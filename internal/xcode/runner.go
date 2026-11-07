@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -105,8 +106,24 @@ func (r *ExecRunner) command(ctx context.Context, c Cmd) *exec.Cmd {
 		cmd.Env = append(os.Environ(), c.Env...)
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Stdin, c.Stdout, c.Stderr
-	// Interrupt like Ctrl-C would, so tools can clean up; kill after WaitDelay.
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	// Each child gets its own process group, so a Ctrl-C in the terminal
+	// reaches only runway, and runway sends exactly one SIGINT (below).
+	// Otherwise children would get the terminal's SIGINT *and* runway's, and
+	// tools that forward signals (devicectl) warn about the second one. No
+	// child reads from the terminal, so leaving its foreground group is safe.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// On cancel, interrupt the whole group (including the tool's own children,
+	// e.g. xcodebuild's compilers) like Ctrl-C would, so tools can clean up;
+	// the child is killed if it hasn't exited after WaitDelay.
+	cmd.Cancel = func() error {
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
 	cmd.WaitDelay = r.WaitDelay
 	if cmd.WaitDelay == 0 {
 		cmd.WaitDelay = DefaultWaitDelay

@@ -1,0 +1,41 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.processes",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.32"
+  },
+  "result": {
+    "deviceIdentifier": "00000000-0000-4000-8000-0000000000DD",
+    "runningProcesses": [
+      {
+        "executable": "file:///System/Library/CoreServices/SpringBoard.app/SpringBoard",
+        "processIdentifier": 38
+      },
+      {
+        "executable": "file:///usr/libexec/UserEventAgent",
+        "processIdentifier": 34
+      },
+      {
+        "executable": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-000000000001/WeatherPosterApp.app/Extensions/WeatherPoster.appex/WeatherPoster",
+        "processIdentifier": 478
+      },
+      {
+        "executable": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-000000000002/MobileCal.app/MobileCal",
+        "processIdentifier": 585
+      },
+      {
+        "executable": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-0000000000AA/ActorTest.app/PlugIns/ActorTestWidget.appex/ActorTestWidget",
+        "processIdentifier": 5101
+      },
+      {
+        "executable": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-0000000000AA/ActorTest.app/ActorTestHelper",
+        "processIdentifier": 5102
+      },
+      {
+        "executable": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-0000000000AA/ActorTest.app/ActorTest",
+        "processIdentifier": 5103
+      }
+    ]
+  }
+}

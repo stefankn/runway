@@ -154,10 +154,8 @@ func device(ctx context.Context, client *xcode.Client, query string, pick ui.Pic
 		return Destination{}, err
 	}
 	if query == "" {
-		for _, d := range devs {
-			if d.Available() {
-				return fromDevice(d), nil
-			}
+		if d, ok := defaultDevice(devs); ok {
+			return fromDevice(d), nil
 		}
 		if len(devs) == 0 {
 			return Destination{}, fmt.Errorf("no devices found; connect one with a cable, or pair one in Device Hub")
@@ -189,6 +187,30 @@ func device(ctx context.Context, client *xcode.Client, query string, pick ui.Pic
 		return Destination{}, fmt.Errorf("%s is not reachable; connect it with a cable, or unlock it and make sure it's on the same network as this Mac", d.Name)
 	}
 	return fromDevice(d), nil
+}
+
+// defaultDevice returns the first available iOS device (iPhone or iPad), else
+// the first available device of any platform. devs must be sorted with
+// xcode.SortDevices, so wired devices come before network ones. Preferring
+// iOS mirrors the default simulator: a nearby Apple TV or Watch is rarely
+// what `--device` means.
+func defaultDevice(devs []xcode.Device) (xcode.Device, bool) {
+	var fallback *xcode.Device
+	for i, d := range devs {
+		if !d.Available() {
+			continue
+		}
+		if d.Platform == "iOS" {
+			return d, true
+		}
+		if fallback == nil {
+			fallback = &devs[i]
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return xcode.Device{}, false
 }
 
 // pickAny lets the user choose among available simulators and devices.

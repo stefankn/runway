@@ -109,10 +109,11 @@ func buildErr(err error) error {
 
 // AppProduct is the app a build produced.
 type AppProduct struct {
-	Path     string // …/Build/Products/Debug-iphonesimulator/MyApp.app
-	BundleID string
-	Target   string
-	Platform string // PLATFORM_NAME, e.g. "iphonesimulator", "iphoneos"
+	Path       string // …/Build/Products/Debug-iphonesimulator/MyApp.app
+	BundleID   string
+	Executable string // EXECUTABLE_NAME: the binary inside the bundle
+	Target     string
+	Platform   string // PLATFORM_NAME, e.g. "iphonesimulator", "iphoneos"
 }
 
 // AppProduct asks xcodebuild where the scheme's app is, using the same
@@ -150,10 +151,11 @@ func parseBuildSettings(data []byte, scheme string) (AppProduct, error) {
 			continue
 		}
 		apps = append(apps, AppProduct{
-			Path:     filepath.Join(s["TARGET_BUILD_DIR"], s["WRAPPER_NAME"]),
-			BundleID: s["PRODUCT_BUNDLE_IDENTIFIER"],
-			Target:   e.Target,
-			Platform: s["PLATFORM_NAME"],
+			Path:       filepath.Join(s["TARGET_BUILD_DIR"], s["WRAPPER_NAME"]),
+			BundleID:   s["PRODUCT_BUNDLE_IDENTIFIER"],
+			Executable: s["EXECUTABLE_NAME"],
+			Target:     e.Target,
+			Platform:   s["PLATFORM_NAME"],
 		})
 	}
 	if len(apps) == 0 {

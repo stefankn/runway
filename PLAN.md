@@ -18,7 +18,7 @@ A Go command-line tool that does from the terminal what Xcode's toolbar does: bu
 | Command | Purpose |
 |---|---|
 | `runway devices` | List connected and paired physical devices |
-| `runway sims` | List available simulators |
+| `runway simulators` | List available simulators |
 | `runway build` | Build the app for a simulator or device |
 | `runway run` | Build, install and launch the app, then stream its console until Ctrl-C |
 | `runway logs` | Stream unified logging (`Logger` / `os_log`) output for the app |
@@ -51,7 +51,7 @@ Tests, archiving and TestFlight uploads, simulator management (create, erase, bo
 runway/
 ├── cmd/runway/main.go              # entry point; sets version via ldflags
 ├── internal/
-│   ├── cli/                      # cobra commands: root, devices, sims, build, run, logs, version
+│   ├── cli/                      # cobra commands: root, devices, simulators, build, run, logs, version
 │   ├── xcode/                    # ★ the ONLY place that touches Apple tools
 │   │   ├── runner.go             # Runner interface + real exec implementation (+ verbose printing)
 │   │   ├── xcodebuild.go         # List(), ShowBuildSettings(), Build()
@@ -126,7 +126,7 @@ Rules:
 - Flags: `--json` (prints runway's own clean `[]Device` JSON, not Apple's), `--all` (include unavailable or unpaired devices).
 - Accepted when it shows the same devices as Device Hub, and the UDIDs it prints work in `xcodebuild -destination`.
 
-### `runway sims`
+### `runway simulators`
 - Runs `simctl list devices available -j`.
 - Table columns: Name, Runtime, State, UDID. Sorted by platform, then newest runtime, then name. Booted simulators are highlighted.
 - Flags: `--json`, `--booted`, `--platform ios|watchos|tvos|visionos`, `--runtime <version>`.
@@ -140,7 +140,7 @@ Rules:
 - **Friendly errors** (hint printed after the raw error, never replacing it):
   - signing or "requires a development team" → suggest `team` in config or `--team`
   - device locked, Developer Mode off, or not paired → say how to fix it (Device Hub → Pair, Settings → Privacy & Security → Developer Mode)
-  - "Unable to find a destination" → suggest `runway sims` / `runway devices`
+  - "Unable to find a destination" → suggest `runway simulators` / `runway devices`
 
 ### `runway run`
 Equivalent to Xcode's Run button:
@@ -172,6 +172,8 @@ Streams unified logging for the app, filtered by default to `subsystem == "<log_
 ## 8. Things to verify on a real Mac before or while implementing
 
 Don't guess about these. Check each against Xcode 27.2 and record the result in a comment or in `docs/`:
+
+> Results so far are in [`docs/xcode-notes.md`](docs/xcode-notes.md) (items 1, 2, 3, 5 and 6 checked).
 1. The exact devicectl JSON (version 5): the keys inside `properties` that give name, UDID, OS version, model, platform, connection or tunnel state, pairing state and Developer Mode.
 2. Whether `devicectl … --json-output -` mixes any non-JSON text into stdout.
 3. What `simctl launch --console-pty` and `devicectl … launch --console` do on SIGINT: does the app keep running?
@@ -198,7 +200,7 @@ Don't guess about these. Check each against Xcode 27.2 and record the result in 
 ## 11. Milestones (build in this order; each one ends in a working, tested state)
 
 1. **Scaffold:** Go module, cobra root, `version`, the `Runner` interface with `--verbose` command echo, CI with lint and tests.
-2. **`sims` + `devices`:** parsers, fixtures, table output, and `--json`.
+2. **`simulators` + `devices`:** parsers, fixtures, table output, and `--json`.
 3. **Project detection + config:** workspace/project/scheme detection, `.runway.toml`, the precedence rules, and the picker.
 4. **`build`:** destination resolution, xcbeautify passthrough, friendly errors, printing the app path and bundle ID.
 5. **`run` on a simulator:** boot, install, launch with console, clean Ctrl-C.
@@ -208,7 +210,7 @@ Don't guess about these. Check each against Xcode 27.2 and record the result in 
 
 ## 12. Future ideas (not v0.1; keep the design open to them)
 
-`runway test` (with a readable failure summary), `runway archive` / `runway upload` (TestFlight via an App Store Connect API key: `-authenticationKeyPath/-ID/-IssuerID`), `runway sims boot|erase|create`, `runway doctor` (checks the Xcode version, `xcode-select` path, pairing and Developer Mode), `runway init`, a debugger flag (`run --debug`, launching with `--start-stopped` and attaching lldb), watch mode (rebuild and rerun when files change).
+`runway test` (with a readable failure summary), `runway archive` / `runway upload` (TestFlight via an App Store Connect API key: `-authenticationKeyPath/-ID/-IssuerID`), `runway simulators boot|erase|create`, `runway doctor` (checks the Xcode version, `xcode-select` path, pairing and Developer Mode), `runway init`, a debugger flag (`run --debug`, launching with `--start-stopped` and attaching lldb), watch mode (rebuild and rerun when files change).
 
 ---
 

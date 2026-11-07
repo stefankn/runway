@@ -81,7 +81,20 @@ button) is a harmless safety net, and nothing is killed twice. Because simctl
 exits 0 either way, runway decides "interrupted" from its own context, not from
 simctl's exit status.
 
-The device side (`devicectl … --console`) is still to check (Milestone 6).
+Devices, checked 2026-11-07: `devicectl … --console` forwards SIGINT to the
+app, which quits ("App terminated due to signal 2."). devicectl prints a
+warning if it gets a *second* SIGINT after the app has gone ("Failed to
+forward Interrupt: 2 to remote process"). That used to happen because a
+terminal Ctrl-C reached devicectl directly *and* through runway. runway now
+starts every child in its own process group, so only runway receives the
+terminal's signals and it sends exactly one SIGINT to each child's group.
+runway also handles SIGHUP the same way, so closing the terminal window still
+stops the app.
+
+Known limitation on devices: when the app exits by itself, devicectl reports
+"The app terminated with the exit code 0." and exits 0 even when the app
+called `exit(3)` (seen with a Debug build). runway can only pass on what
+devicectl returns. Simulators report the real exit status.
 
 ## §8.6 Simulator window
 
@@ -107,7 +120,26 @@ lists back in sync.
 has finished booting; it returns at once for a booted simulator. runway uses it
 instead of `simctl boot`, so `install` never runs on a half-booted simulator.
 
+## Running on a device (devicectl 651.32)
+
+- Install: `devicectl device install app --device <udid> <path.app>`.
+- Launch: `devicectl device process launch --console --terminate-existing
+  --device <udid> <bundle id> [-- args…]`. With `--console`, devicectl waits
+  for the app to exit, forwards catchable signals to it, and connects its
+  standard streams; `--json-output -` can't be combined with `--console`.
+- Environment variables: set `DEVICECTL_CHILD_<KEY>` in devicectl's own
+  environment (the same pattern as simctl's `SIMCTL_CHILD_`).
+- Terminate takes a PID: `devicectl device process terminate --device <udid>
+  --pid <pid>`. runway finds the PID with `devicectl device info processes
+  --device <udid> --json-output -` (`result.runningProcesses[]` with
+  `executable` as a `file://` URL and `processIdentifier`). An installed app's
+  executable is `/private/var/containers/Bundle/Application/<uuid>/<App>.app/<Executable>`;
+  its extensions run from `…/<App>.app/PlugIns/<X>.appex/<X>`, so matching
+  the `/<App>.app/<Executable>` ending can't pick an extension.
+- `devicectl` can't install from inside another sandbox: it fails with
+  `sandbox_extension_issue_file … Operation not permitted`. This only affects
+  sandboxed development environments, not normal use.
+
 ## Still to check
 
-- §8.3 for devices: what `devicectl … --console` does on SIGINT (Milestone 6)
 - §8.4 streaming `os_log` from a physical device (Milestone 7)

@@ -136,3 +136,91 @@ func TestListDevicesError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestDeviceCommands(t *testing.T) {
+	ctx := context.Background()
+	f := &FakeRunner{Default: FakeResult{Stdout: readFixture(t, "devicectl/processes.json")}}
+	c := New(f)
+	const udid = "00008103-000E64123663401E"
+
+	if err := c.DeviceInstall(ctx, udid, "/b/My App.app"); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{nil, {"-flag", "two words", "--"}} {
+		p, err := c.DeviceLaunch(ctx, udid, "com.x.app", args, []string{"FOO=bar baz"}, ConsoleIO{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = p.Wait()
+	}
+	pid, found, err := c.DeviceAppPID(ctx, udid, AppProduct{Path: "/b/ActorTest.app", Executable: "ActorTest"})
+	if err != nil || !found || pid != 5103 {
+		t.Errorf("DeviceAppPID = %d, %v, %v; want 5103", pid, found, err)
+	}
+	if err := c.DeviceTerminate(ctx, udid, 5103); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, cmd := range f.Calls() {
+		got = append(got, cmd.String())
+	}
+	want := []string{
+		"xcrun devicectl device install app --device 00008103-000E64123663401E '/b/My App.app'",
+		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-000E64123663401E com.x.app",
+		// The app's own "--" is passed along after devicectl's.
+		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-000E64123663401E com.x.app -- -flag 'two words' --",
+		"xcrun devicectl device info processes --device 00008103-000E64123663401E --json-output -",
+		"xcrun devicectl device process terminate --device 00008103-000E64123663401E --pid 5103",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The fixture is a real `devicectl device info processes` capture, trimmed;
+// the ActorTest entries follow the path pattern of the real installed apps.
+func TestFindAppProcess(t *testing.T) {
+	data := readFixture(t, "devicectl/processes.json")
+	for _, tc := range []struct {
+		wrapper, executable string
+		pid                 int
+		found               bool
+	}{
+		{"ActorTest.app", "ActorTest", 5103, true},   // not the widget extension or the helper
+		{"MobileCal.app", "MobileCal", 585, true},    // a real installed app
+		{"SpringBoard.app", "SpringBoard", 0, false}, // system app, not under /Bundle/Application/
+		{"Other.app", "Other", 0, false},
+	} {
+		pid, found, err := findAppProcess(data, tc.wrapper, tc.executable)
+		if err != nil || pid != tc.pid || found != tc.found {
+			t.Errorf("%s: got %d, %v, %v; want %d, %v", tc.wrapper, pid, found, err, tc.pid, tc.found)
+		}
+	}
+	if _, _, err := findAppProcess([]byte("nope"), "A.app", "A"); err == nil {
+		t.Error("invalid JSON: want error")
+	}
+}
+
+func TestDeviceWrappersWrapErrors(t *testing.T) {
+	ctx := context.Background()
+	fail := &ExitError{Cmd: Cmd{Name: "xcrun"}, Code: 1, Stderr: []byte("ERROR: boom")}
+	c := New(&FakeRunner{Default: FakeResult{Err: fail, StartErr: errors.New("no devicectl")}})
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{c.DeviceInstall(ctx, "D", "/a.app"), "installing app: "},
+		{c.DeviceTerminate(ctx, "D", 1), "stopping app: "},
+	} {
+		if tc.err == nil || !strings.HasPrefix(tc.err.Error(), tc.want) {
+			t.Errorf("err = %v, want prefix %q", tc.err, tc.want)
+		}
+	}
+	if _, err := c.DeviceLaunch(ctx, "D", "x", nil, nil, ConsoleIO{}); err == nil || !strings.HasPrefix(err.Error(), "launching app: ") {
+		t.Errorf("launch err = %v", err)
+	}
+	if _, _, err := c.DeviceAppPID(ctx, "D", AppProduct{}); err == nil || !strings.HasPrefix(err.Error(), "listing device processes: ") {
+		t.Errorf("pid err = %v", err)
+	}
+}

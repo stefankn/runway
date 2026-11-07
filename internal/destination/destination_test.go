@@ -278,3 +278,26 @@ func TestPickAnyIgnoresDevicectlFailure(t *testing.T) {
 		t.Errorf("choices = %d, want the 14 simulators", n)
 	}
 }
+
+func TestDefaultDevicePrefersIOS(t *testing.T) {
+	// All on the network: the Apple TV sorts first by name, but --device
+	// should pick an iPhone or iPad.
+	devs := []byte(`{"info": {"outcome": "success"}, "result": {"devices": [
+		{"properties": {"hardware": {"udid": "TV", "platform": "tvOS"}, "connection": {"pairingState": "paired", "transportType": "localNetwork"}, "state": {"name": "Living Room"}}},
+		{"properties": {"hardware": {"udid": "PAD", "platform": "iOS"}, "connection": {"pairingState": "paired", "transportType": "localNetwork"}, "state": {"name": "iPad"}}}
+	]}}`)
+	c, _ := client(t, nil, nil, devs)
+	d, err := Resolve(context.Background(), c, Request{Device: ptr("")}, nil)
+	if err != nil || d.Device.UDID != "PAD" {
+		t.Errorf("got %+v, %v; want the iPad", d.Device, err)
+	}
+
+	tvOnly := []byte(`{"info": {"outcome": "success"}, "result": {"devices": [
+		{"properties": {"hardware": {"udid": "TV", "platform": "tvOS"}, "connection": {"pairingState": "paired", "transportType": "localNetwork"}, "state": {"name": "Living Room"}}}
+	]}}`)
+	c, _ = client(t, nil, nil, tvOnly)
+	d, err = Resolve(context.Background(), c, Request{Device: ptr("")}, nil)
+	if err != nil || d.Device.UDID != "TV" {
+		t.Errorf("only a TV: got %+v, %v; want the TV as fallback", d.Device, err)
+	}
+}

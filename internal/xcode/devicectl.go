@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // ListDevices returns the physical devices CoreDevice knows about (paired or
@@ -205,6 +208,81 @@ func firstNonEmptyRaw(vals ...json.RawMessage) json.RawMessage {
 		if len(v) > 0 && string(v) != "null" {
 			return v
 		}
+	}
+	return nil
+}
+
+// DeviceInstall installs an app bundle on a physical device.
+func (c *Client) DeviceInstall(ctx context.Context, udid, appPath string) error {
+	if _, err := c.r.Output(ctx, xcrun("devicectl", "device", "install", "app", "--device", udid, appPath)); err != nil {
+		return fmt.Errorf("installing app: %w", err)
+	}
+	return nil
+}
+
+// DeviceLaunch launches an app on a physical device with its console
+// attached, replacing a running copy, and streams its output until it exits.
+// args are passed to the app; env entries ("KEY=VALUE") are set in its
+// environment through devicectl's DEVICECTL_CHILD_ prefix. devicectl forwards
+// catchable signals it receives to the app.
+func (c *Client) DeviceLaunch(ctx context.Context, udid, bundleID string, args, env []string, cio ConsoleIO) (Process, error) {
+	cmdArgs := []string{"devicectl", "device", "process", "launch", "--console", "--terminate-existing", "--device", udid, bundleID}
+	if len(args) > 0 {
+		// "--" stops devicectl from reading the app's arguments as its own options.
+		cmdArgs = append(append(cmdArgs, "--"), args...)
+	}
+	cmd := xcrun(cmdArgs...)
+	for _, kv := range env {
+		cmd.Env = append(cmd.Env, "DEVICECTL_CHILD_"+kv)
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = cio.Stdin, cio.Stdout, cio.Stderr
+	p, err := c.r.Start(ctx, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("launching app: %w", err)
+	}
+	return p, nil
+}
+
+// DeviceAppPID finds the process of an installed app on a device. found is
+// false when the app isn't running.
+func (c *Client) DeviceAppPID(ctx context.Context, udid string, app AppProduct) (pid int, found bool, err error) {
+	out, err := c.r.Output(ctx, xcrun("devicectl", "device", "info", "processes", "--device", udid, "--json-output", "-"))
+	if err != nil {
+		return 0, false, fmt.Errorf("listing device processes: %w", err)
+	}
+	return findAppProcess(out, filepath.Base(app.Path), app.Executable)
+}
+
+// Output of `devicectl device info processes --json-output -`.
+type rawProcesses struct {
+	Result struct {
+		RunningProcesses []struct {
+			Executable        string `json:"executable"`
+			ProcessIdentifier int    `json:"processIdentifier"`
+		} `json:"runningProcesses"`
+	} `json:"result"`
+}
+
+// findAppProcess returns the PID of the installed app whose executable is
+// …/Bundle/Application/<uuid>/<wrapper>/<executable>.
+func findAppProcess(data []byte, wrapper, executable string) (int, bool, error) {
+	var raw rawProcesses
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return 0, false, fmt.Errorf("parsing devicectl processes JSON: %w", err)
+	}
+	suffix := "/" + wrapper + "/" + executable
+	for _, p := range raw.Result.RunningProcesses {
+		if strings.Contains(p.Executable, "/Bundle/Application/") && strings.HasSuffix(p.Executable, suffix) {
+			return p.ProcessIdentifier, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// DeviceTerminate stops a process on a physical device.
+func (c *Client) DeviceTerminate(ctx context.Context, udid string, pid int) error {
+	if _, err := c.r.Output(ctx, xcrun("devicectl", "device", "process", "terminate", "--device", udid, "--pid", strconv.Itoa(pid))); err != nil {
+		return fmt.Errorf("stopping app: %w", err)
 	}
 	return nil
 }

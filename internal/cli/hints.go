@@ -27,6 +27,10 @@ var buildHints = []hint{
 		"Turn on Developer Mode on the device (Settings → Privacy & Security → Developer Mode), then restart it.",
 	},
 	{
+		[]string{"has not been explicitly trusted", "untrusted developer"},
+		"On the device, trust your developer certificate: Settings → General → VPN & Device Management.",
+	},
+	{
 		[]string{"not paired", "pairing"},
 		"Pair the device with this Mac in Device Hub.",
 	},

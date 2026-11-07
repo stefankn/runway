@@ -16,10 +16,11 @@ func TestHintScanner(t *testing.T) {
 		{"error: No Account for Team \"ABC\".\n", []int{0}},
 		{"Unable to launch: the device is locked.\n", []int{1}},
 		{"error: Developer Mode disabled\n", []int{2}},
-		{"error: The device is not paired with this Mac\n", []int{3}},
-		{"xcodebuild: error: Unable to find a device matching the provided destination specifier:\n", []int{4}},
+		{"The application could not be launched: its profile has not been explicitly trusted by the user.\n", []int{3}},
+		{"error: The device is not paired with this Mac\n", []int{4}},
+		{"xcodebuild: error: Unable to find a device matching the provided destination specifier:\n", []int{5}},
 		{"** BUILD SUCCEEDED **\n", nil},
-		{"requires a development team\nUnable to find a device matching\n", []int{0, 4}},
+		{"requires a development team\nUnable to find a device matching\n", []int{0, 5}},
 		{"no trailing newline: device is locked", []int{1}},
 	} {
 		h := newHintScanner()

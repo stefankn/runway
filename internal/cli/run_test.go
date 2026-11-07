@@ -36,7 +36,7 @@ func runSetup(t *testing.T, withApp bool) (dir, appPath string) {
 func runFake(t *testing.T, appPath string, launch, terminate xcode.FakeResult) *xcode.FakeRunner {
 	t.Helper()
 	settings := fmt.Sprintf(`[{"target": "ActorTest", "buildSettings": {"WRAPPER_EXTENSION": "app", "WRAPPER_NAME": "ActorTest.app",
-		"TARGET_BUILD_DIR": %q, "PRODUCT_BUNDLE_IDENTIFIER": %q}}]`, filepath.Dir(appPath), testBundleID)
+		"EXECUTABLE_NAME": "ActorTest", "TARGET_BUILD_DIR": %q, "PRODUCT_BUNDLE_IDENTIFIER": %q}}]`, filepath.Dir(appPath), testBundleID)
 	answers := []struct {
 		prefix string
 		result xcode.FakeResult
@@ -51,6 +51,10 @@ func runFake(t *testing.T, appPath string, launch, terminate xcode.FakeResult) *
 		{"xcrun simctl install", xcode.FakeResult{}},
 		{"xcrun simctl launch", launch},
 		{"xcrun simctl terminate", terminate},
+		{"xcrun devicectl device install", xcode.FakeResult{}},
+		{"xcrun devicectl device process launch", launch},
+		{"xcrun devicectl device info processes", xcode.FakeResult{Stdout: fixture(t, "devicectl/processes.json")}},
+		{"xcrun devicectl device process terminate", terminate},
 		{"open -b", xcode.FakeResult{}},
 	}
 	return &xcode.FakeRunner{Handler: func(c xcode.Cmd) (xcode.FakeResult, bool) {
@@ -246,7 +250,6 @@ func TestRunRejectsOtherDestinations(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--device"}, "running on devices arrives in the next milestone"},
 		{[]string{"--destination", "platform=iOS Simulator,name=X"}, "run needs --sim or --device"},
 	} {
 		f := runFake(t, appPath, xcode.FakeResult{}, xcode.FakeResult{})
@@ -276,5 +279,166 @@ func TestRunBuildFailureStopsBeforeBoot(t *testing.T) {
 	}
 	if hasCommand(f, "xcrun simctl bootstatus") || hasCommand(f, "xcrun simctl launch") {
 		t.Errorf("continued after a failed build: %q", commandNames(f))
+	}
+}
+
+// flow returns the recorded commands without the discovery queries, each cut
+// to its first n words.
+func flow(f *xcode.FakeRunner, n int) []string {
+	var out []string
+	for _, c := range f.Calls() {
+		parts := append([]string{c.Name}, c.Args...)
+		line := strings.Join(parts[:min(n, len(parts))], " ")
+		if !strings.Contains(line, "list") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// withOverride makes f answer commands starting with prefix with r.
+func withOverride(f *xcode.FakeRunner, prefix string, r xcode.FakeResult) {
+	inner := f.Handler
+	f.Handler = func(c xcode.Cmd) (xcode.FakeResult, bool) {
+		if strings.HasPrefix(c.Name+" "+strings.Join(c.Args, " "), prefix) {
+			return r, true
+		}
+		return inner(c)
+	}
+}
+
+const iPadUDID = "00008103-0000000000000008" // the wired iPad in the devicectl fixture
+
+func TestRunDeviceFlow(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{Stdout: []byte("tick\n")}, xcode.FakeResult{})
+	out, errOut, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--device", "--env", "FOO=bar", "--", "-flag", "v")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, errOut)
+	}
+	want := []string{
+		"xcodebuild build -project",
+		"xcodebuild -showBuildSettings -json",
+		"xcrun devicectl device install app",
+		"xcrun devicectl device process launch",
+	}
+	got := flow(f, 5)
+	if len(got) != len(want) {
+		t.Fatalf("flow:\n got %q\nwant %q", got, want)
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) {
+			t.Errorf("step %d = %q, want %q…", i, got[i], want[i])
+		}
+	}
+	if got := commandArgs(t, f, "xcodebuild build"); argAfter(got, "-destination") != "platform=iOS,id="+iPadUDID {
+		t.Errorf("built for %q", argAfter(got, "-destination"))
+	}
+	launch := commandArgs(t, f, "xcrun devicectl device process launch")
+	wantLaunch := []string{"devicectl", "device", "process", "launch", "--console", "--terminate-existing",
+		"--device", iPadUDID, testBundleID, "--", "-flag", "v"}
+	if !slices.Equal(launch, wantLaunch) {
+		t.Errorf("launch args:\n got %q\nwant %q", launch, wantLaunch)
+	}
+	for _, c := range f.Calls() {
+		if len(c.Args) > 3 && c.Args[3] == "launch" && !slices.Equal(c.Env, []string{"DEVICECTL_CHILD_FOO=bar"}) {
+			t.Errorf("launch env = %q", c.Env)
+		}
+	}
+	if got := commandArgs(t, f, "xcrun devicectl device install"); got[len(got)-1] != appPath {
+		t.Errorf("installed %q", got[len(got)-1])
+	}
+	if !strings.Contains(out, "tick") {
+		t.Errorf("app output missing: %q", out)
+	}
+	for _, s := range []string{"Installing ActorTest.app on iPad van Tester (wired)…", "Launching " + testBundleID + " on iPad van Tester (Ctrl-C to stop)"} {
+		if !strings.Contains(errOut, s) {
+			t.Errorf("stderr is missing %q:\n%s", s, errOut)
+		}
+	}
+}
+
+func TestRunDeviceAppExitStatus(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{Err: &xcode.ExitError{Cmd: xcode.Cmd{Name: "xcrun"}, Code: 3}}, xcode.FakeResult{})
+	_, _, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--device", "--headless")
+	if ec, ok := errors.AsType[ExitCoder](err); !ok || ec.ExitCode() != 3 {
+		t.Errorf("err = %v, want exit status 3", err)
+	}
+	if hasCommand(f, "xcrun devicectl device") && slices.ContainsFunc(flow(f, 5), func(s string) bool {
+		return strings.Contains(s, "terminate") || strings.Contains(s, "info processes")
+	}) {
+		t.Error("app exited by itself; it should not be terminated")
+	}
+}
+
+func TestRunDeviceCtrlC(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		processes     *xcode.FakeResult // nil: the fixture (ActorTest running as 5103)
+		wantTerminate bool
+	}{
+		{"app still running", nil, true},
+		{"app already quit", &xcode.FakeResult{Stdout: []byte(`{"result": {"runningProcesses": []}}`)}, false},
+	} {
+		dir, appPath := runSetup(t, true)
+		f := runFake(t, appPath, xcode.FakeResult{Block: true}, xcode.FakeResult{})
+		if tc.processes != nil {
+			withOverride(f, "xcrun devicectl device info processes", *tc.processes)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, _, err := runOptsCtx(t, ctx, &options{workDir: dir, testRunner: f}, "run", "--device")
+			done <- err
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for !slices.Contains(flow(f, 5), "xcrun devicectl device process launch") {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: app was never launched", tc.name)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("%s: err = %v, want context.Canceled", tc.name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: run did not return after Ctrl-C", tc.name)
+		}
+		terminated := slices.Contains(flow(f, 5), "xcrun devicectl device process terminate")
+		if terminated != tc.wantTerminate {
+			t.Errorf("%s: terminated = %v, want %v", tc.name, terminated, tc.wantTerminate)
+		}
+		if terminated {
+			if got := commandArgs(t, f, "xcrun devicectl device process terminate"); !slices.Equal(got[len(got)-4:], []string{"--device", iPadUDID, "--pid", "5103"}) {
+				t.Errorf("%s: terminate args = %q", tc.name, got)
+			}
+		}
+	}
+}
+
+func TestRunDeviceFailureHints(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+
+	f := runFake(t, appPath, xcode.FakeResult{}, xcode.FakeResult{})
+	withOverride(f, "xcrun devicectl device install", xcode.FakeResult{Err: &xcode.ExitError{
+		Cmd: xcode.Cmd{Name: "xcrun"}, Code: 1, Stderr: []byte("ERROR: The device is locked.\n"),
+	}})
+	_, errOut, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--device")
+	if err == nil || !strings.HasPrefix(err.Error(), "installing app: ") || !strings.Contains(errOut, "hint: Unlock the device") {
+		t.Errorf("install failure: err = %v, stderr = %q", err, errOut)
+	}
+
+	launchFail := xcode.FakeResult{
+		Stderr: []byte("ERROR: The application could not be launched: profile has not been explicitly trusted by the user.\n"),
+		Err:    &xcode.ExitError{Cmd: xcode.Cmd{Name: "xcrun"}, Code: 1},
+	}
+	f = runFake(t, appPath, launchFail, xcode.FakeResult{})
+	_, errOut, err = runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--device")
+	if err == nil || !strings.Contains(errOut, "explicitly trusted") || !strings.Contains(errOut, "hint: On the device, trust your developer certificate") {
+		t.Errorf("launch failure: err = %v, stderr = %q", err, errOut)
 	}
 }

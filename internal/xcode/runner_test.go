@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -254,5 +255,43 @@ func TestFakeStartEchoesStdin(t *testing.T) {
 	}
 	if out.String() != "a\nb\n" {
 		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestExecOwnProcessGroup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p, err := (&ExecRunner{}).Start(ctx, Cmd{Name: "/bin/sleep", Args: []string{"10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := p.(*execProcess).cmd.Process.Pid
+	pgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pgid != pid || pgid == syscall.Getpgrp() {
+		t.Errorf("child pgid = %d (child pid %d, runway's group %d); want its own group", pgid, pid, syscall.Getpgrp())
+	}
+	cancel()
+	_ = p.Wait()
+}
+
+func TestExecCancelInterruptsGrandchildren(t *testing.T) {
+	// sh waits for sleep: SIGINT must reach sleep too (the whole group), or
+	// sh would block until sleep finished.
+	ctx, cancel := context.WithCancel(context.Background())
+	p, err := (&ExecRunner{WaitDelay: 5 * time.Second}).Start(ctx, Cmd{Name: "/bin/sh", Args: []string{"-c", "sleep 10; echo done"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // let sh start sleep
+	start := time.Now()
+	cancel()
+	if err := p.Wait(); !errors.Is(err, context.Canceled) {
+		t.Errorf("Wait() = %v, want context.Canceled", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("took %v to stop; the grandchild didn't get SIGINT", d)
 	}
 }

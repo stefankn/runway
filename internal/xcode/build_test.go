@@ -102,10 +102,11 @@ func TestParseBuildSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := AppProduct{
-		Path:     "/Users/tester/MyProject/.build/runway/Build/Products/Debug-iphonesimulator/Sensors.app",
-		BundleID: "com.github.example.Sensors",
-		Target:   "Sensors",
-		Platform: "iphonesimulator",
+		Path:       "/Users/tester/MyProject/.build/runway/Build/Products/Debug-iphonesimulator/Sensors.app",
+		BundleID:   "com.github.example.Sensors",
+		Executable: "Sensors",
+		Target:     "Sensors",
+		Platform:   "iphonesimulator",
 	}
 	if app != want {
 		t.Errorf("got %+v\nwant %+v", app, want)

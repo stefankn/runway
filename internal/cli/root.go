@@ -114,11 +114,14 @@ const exitInterrupted = 130
 
 // Execute runs runway with the process arguments and returns the exit code.
 //
-// The first SIGINT/SIGTERM cancels the command's context, which interrupts
-// child processes (see xcode.ExecRunner) so they can clean up. After that the
-// default signal handling is restored, so a second Ctrl-C exits immediately.
+// The first SIGINT, SIGTERM or SIGHUP cancels the command's context, which
+// interrupts child processes (see xcode.ExecRunner) so they can clean up.
+// Children run in their own process groups, so they don't get the terminal's
+// signals themselves: runway passes them on. That includes SIGHUP, so closing
+// the terminal window still stops a running app. After the first signal the
+// default handling is restored, so a second Ctrl-C exits immediately.
 func Execute(info BuildInfo) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	go func() {
 		<-ctx.Done()
