@@ -1,6 +1,7 @@
 package xcode
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -133,5 +134,72 @@ func TestListSimulatorsError(t *testing.T) {
 	}
 	if !strings.HasPrefix(err.Error(), "listing simulators: xcrun exited with status 72: xcrun: error") {
 		t.Errorf("message = %q", err.Error())
+	}
+}
+
+func TestSimLifecycleCommands(t *testing.T) {
+	ctx := context.Background()
+	f := &FakeRunner{}
+	c := New(f)
+	const udid = "SIM-1"
+	if err := c.SimBoot(ctx, udid); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SimInstall(ctx, udid, "/b/My App.app"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	p, err := c.SimLaunch(ctx, udid, "com.x.app", []string{"-flag", "two words"}, []string{"FOO=bar baz"}, ConsoleIO{Stdout: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SimTerminate(ctx, udid, "com.x.app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.OpenDeviceHub(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, cmd := range f.Calls() {
+		got = append(got, cmd.String())
+	}
+	want := []string{
+		"xcrun simctl bootstatus SIM-1 -b",
+		"xcrun simctl install SIM-1 '/b/My App.app'",
+		"SIMCTL_CHILD_FOO='bar baz' xcrun simctl launch --console-pty --terminate-running-process SIM-1 com.x.app -flag 'two words'",
+		"xcrun simctl terminate SIM-1 com.x.app",
+		"open -b com.apple.dt.Devices",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands:\n got %q\nwant %q", got, want)
+	}
+	if launch := f.Calls()[2]; launch.Stdout != &out {
+		t.Error("launch output is not connected to the console writer")
+	}
+}
+
+func TestSimWrappersWrapErrors(t *testing.T) {
+	ctx := context.Background()
+	fail := &ExitError{Cmd: Cmd{Name: "xcrun"}, Code: 149, Stderr: []byte("Invalid device: SIM-1")}
+	c := New(&FakeRunner{Default: FakeResult{Err: fail, StartErr: errors.New("no simctl")}})
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{c.SimBoot(ctx, "SIM-1"), "booting simulator: "},
+		{c.SimInstall(ctx, "SIM-1", "/a.app"), "installing app: "},
+		{c.SimTerminate(ctx, "SIM-1", "x"), "stopping app: "},
+		{c.OpenDeviceHub(ctx), "opening DeviceHub: "},
+	} {
+		if tc.err == nil || !strings.HasPrefix(tc.err.Error(), tc.want) {
+			t.Errorf("err = %v, want prefix %q", tc.err, tc.want)
+		}
+	}
+	if _, err := c.SimLaunch(ctx, "SIM-1", "x", nil, nil, ConsoleIO{}); err == nil || !strings.HasPrefix(err.Error(), "launching app: ") {
+		t.Errorf("launch err = %v", err)
 	}
 }

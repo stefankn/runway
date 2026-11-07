@@ -102,6 +102,7 @@ see every underlying command.`,
 		newConfigCommand(opts),
 		newDevicesCommand(opts),
 		newInitCommand(opts),
+		newRunCommand(opts),
 		newSimulatorsCommand(opts),
 		newVersionCommand(info),
 	)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strconv"
@@ -113,4 +114,64 @@ func normalizePlatform(p string) string {
 		return "visionOS"
 	}
 	return p
+}
+
+// DeviceHubBundleID identifies the app that shows simulator windows. Xcode 27
+// replaced Simulator.app with DeviceHub.
+const DeviceHubBundleID = "com.apple.dt.Devices"
+
+// SimBoot boots a simulator if needed and waits until it has finished
+// booting. It returns at once if the simulator is already booted.
+func (c *Client) SimBoot(ctx context.Context, udid string) error {
+	if _, err := c.r.Output(ctx, xcrun("simctl", "bootstatus", udid, "-b")); err != nil {
+		return fmt.Errorf("booting simulator: %w", err)
+	}
+	return nil
+}
+
+// SimInstall installs an app bundle on a simulator.
+func (c *Client) SimInstall(ctx context.Context, udid, appPath string) error {
+	if _, err := c.r.Output(ctx, xcrun("simctl", "install", udid, appPath)); err != nil {
+		return fmt.Errorf("installing app: %w", err)
+	}
+	return nil
+}
+
+// ConsoleIO connects a launched app's console to runway's terminal.
+type ConsoleIO struct {
+	Stdin          io.Reader
+	Stdout, Stderr io.Writer
+}
+
+// SimLaunch launches an app and streams its stdout and stderr until it exits.
+// A running copy is replaced. args are passed to the app; env entries
+// ("KEY=VALUE") are set in its environment through simctl's SIMCTL_CHILD_
+// prefix. Signals sent to the returned process are passed on to the app.
+func (c *Client) SimLaunch(ctx context.Context, udid, bundleID string, args, env []string, cio ConsoleIO) (Process, error) {
+	cmd := xcrun(append([]string{"simctl", "launch", "--console-pty", "--terminate-running-process", udid, bundleID}, args...)...)
+	for _, kv := range env {
+		cmd.Env = append(cmd.Env, "SIMCTL_CHILD_"+kv)
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = cio.Stdin, cio.Stdout, cio.Stderr
+	p, err := c.r.Start(ctx, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("launching app: %w", err)
+	}
+	return p, nil
+}
+
+// SimTerminate stops an app on a simulator.
+func (c *Client) SimTerminate(ctx context.Context, udid, bundleID string) error {
+	if _, err := c.r.Output(ctx, xcrun("simctl", "terminate", udid, bundleID)); err != nil {
+		return fmt.Errorf("stopping app: %w", err)
+	}
+	return nil
+}
+
+// OpenDeviceHub brings the DeviceHub window (which shows simulators) to the front.
+func (c *Client) OpenDeviceHub(ctx context.Context) error {
+	if _, err := c.r.Output(ctx, Cmd{Name: "open", Args: []string{"-b", DeviceHubBundleID}}); err != nil {
+		return fmt.Errorf("opening DeviceHub: %w", err)
+	}
+	return nil
 }

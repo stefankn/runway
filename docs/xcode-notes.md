@@ -71,8 +71,43 @@ Still unconfirmed (the hint patterns are best guesses): the exact signing,
 locked-device, Developer Mode and pairing messages. Check them with a real
 device build and update `internal/cli/hints.go`.
 
+## §8.3 SIGINT during `simctl launch --console-pty`
+
+Checked 2026-11-07: simctl passes SIGINT on to the app, which quits at once;
+simctl then exits with status **0**. A following
+`simctl terminate <udid> <bundle id>` prints `found nothing to terminate` and
+also exits 0. So after Ctrl-C, runway's explicit terminate (like Xcode's Stop
+button) is a harmless safety net, and nothing is killed twice. Because simctl
+exits 0 either way, runway decides "interrupted" from its own context, not from
+simctl's exit status.
+
+The device side (`devicectl … --console`) is still to check (Milestone 6).
+
+## §8.6 Simulator window
+
+Xcode 27.2 has no Simulator.app. Simulators are shown in **DeviceHub**
+(`Xcode.app/Contents/Applications/DeviceHub.app`, bundle ID
+`com.apple.dt.Devices`). runway opens it with `open -b com.apple.dt.Devices`,
+by bundle ID so a rename doesn't break it.
+
+Known limitation: this brings DeviceHub to the front but doesn't select the
+simulator runway booted. `open "devices://device/open?id=<UDID>"` (the URL
+form devicectl reports for physical devices) opens DeviceHub without selecting
+a simulator either. Left as is; revisit if Apple documents a way.
+
+DeviceHub's device list comes from CoreDevice (the same as `devicectl list
+devices`), not straight from `simctl`. After old Xcode versions it can show
+stale simulators that `simctl` no longer has. Deleting unavailable simulators
+(`xcrun simctl delete unavailable`) and restarting the Mac brought the two
+lists back in sync.
+
+## Simulator boot
+
+`simctl bootstatus <udid> -b` boots the simulator if needed and waits until it
+has finished booting; it returns at once for a booted simulator. runway uses it
+instead of `simctl boot`, so `install` never runs on a half-booted simulator.
+
 ## Still to check
 
-- §8.3 what `simctl launch --console-pty` / `devicectl … --console` do on SIGINT (Milestone 5/6)
+- §8.3 for devices: what `devicectl … --console` does on SIGINT (Milestone 6)
 - §8.4 streaming `os_log` from a physical device (Milestone 7)
-- §8.6 `open -a "Device Hub"` vs `open -a Simulator` (Milestone 5)

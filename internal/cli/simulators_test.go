@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stefankn/runway/internal/xcode"
@@ -29,13 +31,39 @@ func runWith(t *testing.T, fake *xcode.FakeRunner, args ...string) (stdout, stde
 // runOpts runs runway with args and the given options (test hooks).
 func runOpts(t *testing.T, opts *options, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	var out, errOut bytes.Buffer
+	return runOptsCtx(t, context.Background(), opts, args...)
+}
+
+// runOptsCtx is runOpts with a context, e.g. one the test cancels to
+// simulate Ctrl-C.
+func runOptsCtx(t *testing.T, ctx context.Context, opts *options, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	var out, errOut syncBuffer
 	root := newRootCommand(testInfo, opts)
 	root.SetArgs(args)
 	root.SetOut(&out)
 	root.SetErr(&errOut)
-	err = root.Execute()
+	err = root.ExecuteContext(ctx)
 	return out.String(), errOut.String(), err
+}
+
+// syncBuffer is a bytes.Buffer that is safe for concurrent writes, since
+// child process output is copied in separate goroutines.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func simulatorsFake(t *testing.T) *xcode.FakeRunner {
