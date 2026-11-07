@@ -141,7 +141,7 @@ func TestDeviceCommands(t *testing.T) {
 	ctx := context.Background()
 	f := &FakeRunner{Default: FakeResult{Stdout: readFixture(t, "devicectl/processes.json")}}
 	c := New(f)
-	const udid = "00008103-000E64123663401E"
+	const udid = "00008103-0000000000000008"
 
 	if err := c.DeviceInstall(ctx, udid, "/b/My App.app"); err != nil {
 		t.Fatal(err)
@@ -166,12 +166,12 @@ func TestDeviceCommands(t *testing.T) {
 		got = append(got, cmd.String())
 	}
 	want := []string{
-		"xcrun devicectl device install app --device 00008103-000E64123663401E '/b/My App.app'",
-		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-000E64123663401E com.x.app",
+		"xcrun devicectl device install app --device 00008103-0000000000000008 '/b/My App.app'",
+		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-0000000000000008 com.x.app",
 		// The app's own "--" is passed along after devicectl's.
-		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-000E64123663401E com.x.app -- -flag 'two words' --",
-		"xcrun devicectl device info processes --device 00008103-000E64123663401E --json-output -",
-		"xcrun devicectl device process terminate --device 00008103-000E64123663401E --pid 5103",
+		"DEVICECTL_CHILD_FOO='bar baz' xcrun devicectl device process launch --console --terminate-existing --device 00008103-0000000000000008 com.x.app -- -flag 'two words' --",
+		"xcrun devicectl device info processes --device 00008103-0000000000000008 --json-output -",
+		"xcrun devicectl device process terminate --device 00008103-0000000000000008 --pid 5103",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("commands:\n got %q\nwant %q", got, want)
