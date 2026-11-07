@@ -1,0 +1,45 @@
+# --- Build output ---
+# `just build`
+/bin/
+# GoReleaser
+/dist/
+# `go build ./cmd/runway` in the repo root
+/runway
+
+# runway's default derived data (derived_data in .runway.toml), e.g. when
+# running runway against the sample app from the repo root
+.build/
+
+# --- Go ---
+# Test binaries (`go test -c`) and profiles
+*.test
+*.out
+*.prof
+coverage.*
+cover.html
+
+# Personal multi-module workspaces
+go.work
+go.work.sum
+
+# Debugger binaries (Delve)
+__debug_bin*
+
+# --- Xcode (for the integration-test sample app) ---
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# --- Environment and secrets ---
+.env
+.env.*
+
+# --- Editors and OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code personal settings (shared settings in .claude/settings.json stay tracked)
+.claude/settings.local.json

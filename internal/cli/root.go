@@ -31,12 +31,22 @@ type ExitCoder interface {
 // options holds global flags shared by all subcommands.
 type options struct {
 	verbose bool
+
+	testRunner xcode.Runner // set by tests to replace the real runner
 }
 
 // runner returns the Runner subcommands use to call Apple's tools.
 // Verbose output (the echoed commands) goes to stderr.
 func (o *options) runner(stderr io.Writer) xcode.Runner {
+	if o.testRunner != nil {
+		return o.testRunner
+	}
 	return &xcode.ExecRunner{Verbose: o.verbose, Log: stderr}
+}
+
+// client returns an xcode.Client for cmd, echoing commands to its stderr.
+func (o *options) client(cmd *cobra.Command) *xcode.Client {
+	return xcode.New(o.runner(cmd.ErrOrStderr()))
 }
 
 // NewRootCommand builds a fresh command tree.
@@ -60,7 +70,11 @@ see every underlying command.`,
 	root.SetVersionTemplate(info.String() + "\n")
 	root.PersistentFlags().BoolVarP(&opts.verbose, "verbose", "v", false, "print every underlying command before it runs")
 
-	root.AddCommand(newVersionCommand(info))
+	root.AddCommand(
+		newDevicesCommand(opts),
+		newSimulatorsCommand(opts),
+		newVersionCommand(info),
+	)
 	return root
 }
 
