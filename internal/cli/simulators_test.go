@@ -23,8 +23,14 @@ func fixture(t *testing.T, path string) []byte {
 // runWith runs runway with args against a fake runner.
 func runWith(t *testing.T, fake *xcode.FakeRunner, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	return runOpts(t, &options{testRunner: fake}, args...)
+}
+
+// runOpts runs runway with args and the given options (test hooks).
+func runOpts(t *testing.T, opts *options, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
 	var out, errOut bytes.Buffer
-	root := newRootCommand(testInfo, &options{testRunner: fake})
+	root := newRootCommand(testInfo, opts)
 	root.SetArgs(args)
 	root.SetOut(&out)
 	root.SetErr(&errOut)

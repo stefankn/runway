@@ -1,0 +1,11 @@
+{
+  "workspace" : {
+    "name" : "Scratch",
+    "schemes" : [
+      "ActorTest",
+      "MenuBarPlugin",
+      "Sensors",
+      "SensorsWidgetExtension"
+    ]
+  }
+}

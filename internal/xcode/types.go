@@ -125,3 +125,44 @@ func SortDevices(devs []Device) {
 		)
 	})
 }
+
+// ContainerKind says whether a Container is a workspace or a project.
+type ContainerKind string
+
+// Container kinds.
+const (
+	Workspace ContainerKind = "workspace"
+	Project   ContainerKind = "project"
+)
+
+// Container is the .xcworkspace or .xcodeproj that xcodebuild builds from.
+type Container struct {
+	Kind ContainerKind `json:"kind"`
+	Path string        `json:"path"`
+}
+
+// Args returns the xcodebuild arguments that select the container.
+func (c Container) Args() []string {
+	return []string{"-" + string(c.Kind), c.Path}
+}
+
+// ProjectInfo is what `xcodebuild -list` reports about a container.
+// Targets and Configurations are only reported for projects.
+type ProjectInfo struct {
+	Name           string   `json:"name"`
+	Schemes        []string `json:"schemes"`
+	Targets        []string `json:"targets,omitempty"`
+	Configurations []string `json:"configurations,omitempty"`
+}
+
+// SimulatorDestination returns the xcodebuild -destination value for a
+// simulator, e.g. "platform=iOS Simulator,id=<UDID>".
+func SimulatorDestination(s Simulator) string {
+	return "platform=" + s.Platform + " Simulator,id=" + s.UDID
+}
+
+// DeviceDestination returns the xcodebuild -destination value for a physical
+// device, e.g. "platform=iOS,id=<UDID>".
+func DeviceDestination(d Device) string {
+	return "platform=" + normalizePlatform(d.Platform) + ",id=" + d.UDID
+}

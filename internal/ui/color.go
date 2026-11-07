@@ -21,9 +21,10 @@ func colorEnabled(isTTY bool, getenv func(string) string) bool {
 	return isTTY && getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
 }
 
-// IsTerminal reports whether w is a character device such as a terminal.
-func IsTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
+// IsTerminal reports whether v (a reader or writer) is a character device
+// such as a terminal.
+func IsTerminal(v any) bool {
+	f, ok := v.(*os.File)
 	if !ok {
 		return false
 	}
@@ -43,6 +44,9 @@ func (s Styler) Bold(text string) string { return s.wrap("1", text) }
 
 // Dim renders text faint.
 func (s Styler) Dim(text string) string { return s.wrap("2", text) }
+
+// Yellow renders text yellow.
+func (s Styler) Yellow(text string) string { return s.wrap("33", text) }
 
 // Green renders text green.
 func (s Styler) Green(text string) string { return s.wrap("32", text) }

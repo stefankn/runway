@@ -1,0 +1,19 @@
+{
+  "project" : {
+    "configurations" : [
+      "Debug",
+      "Release"
+    ],
+    "name" : "Sensors",
+    "schemes" : [
+      "MenuBarPlugin",
+      "Sensors",
+      "SensorsWidgetExtension"
+    ],
+    "targets" : [
+      "Sensors",
+      "MenuBarPlugin",
+      "SensorsWidgetExtension"
+    ]
+  }
+}

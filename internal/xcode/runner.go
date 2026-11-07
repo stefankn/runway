@@ -54,6 +54,8 @@ type Runner interface {
 	// Start starts a long-running command (console, log stream) and returns
 	// immediately. Cancelling ctx interrupts the process.
 	Start(ctx context.Context, c Cmd) (Process, error)
+	// LookPath reports where an executable is on PATH, like exec.LookPath.
+	LookPath(name string) (string, error)
 }
 
 // Process is a command started by Runner.Start.
@@ -150,6 +152,9 @@ func (r *ExecRunner) Start(ctx context.Context, c Cmd) (Process, error) {
 	}
 	return &execProcess{ctx: ctx, c: c, cmd: cmd}, nil
 }
+
+// LookPath implements Runner.
+func (r *ExecRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
 
 type execProcess struct {
 	ctx context.Context

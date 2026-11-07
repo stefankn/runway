@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ const wantVersion = "runway v1.2.3 (commit abc1234, built 2026-11-07)\n"
 
 func TestVersionCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := execute(testInfo, []string{"version"}, &out, &errOut); code != 0 {
+	if code := execute(context.Background(), testInfo, []string{"version"}, &out, &errOut); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, errOut.String())
 	}
 	if out.String() != wantVersion {
@@ -24,7 +25,7 @@ func TestVersionCommand(t *testing.T) {
 
 func TestVersionFlag(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := execute(testInfo, []string{"--version"}, &out, &errOut); code != 0 {
+	if code := execute(context.Background(), testInfo, []string{"--version"}, &out, &errOut); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, errOut.String())
 	}
 	if out.String() != wantVersion {
@@ -34,14 +35,14 @@ func TestVersionFlag(t *testing.T) {
 
 func TestVersionRejectsArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := execute(testInfo, []string{"version", "extra"}, &out, &errOut); code != 1 {
+	if code := execute(context.Background(), testInfo, []string{"version", "extra"}, &out, &errOut); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 }
 
 func TestUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := execute(testInfo, []string{"bogus"}, &out, &errOut)
+	code := execute(context.Background(), testInfo, []string{"bogus"}, &out, &errOut)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}

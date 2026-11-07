@@ -2,13 +2,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
+	"github.com/stefankn/runway/internal/ui"
 	"github.com/stefankn/runway/internal/xcode"
 )
 
@@ -32,7 +36,30 @@ type ExitCoder interface {
 type options struct {
 	verbose bool
 
-	testRunner xcode.Runner // set by tests to replace the real runner
+	// Test hooks.
+	testRunner xcode.Runner // replaces the real runner
+	testPicker ui.Picker    // replaces the interactive picker
+	workDir    string       // replaces the process working directory
+}
+
+// cwd returns the directory runway works in.
+func (o *options) cwd() (string, error) {
+	if o.workDir != "" {
+		return o.workDir, nil
+	}
+	return os.Getwd()
+}
+
+// picker returns the interactive picker, or nil when runway can't prompt
+// (stdin or stderr is not a terminal).
+func (o *options) picker(cmd *cobra.Command) ui.Picker {
+	if o.testPicker != nil {
+		return o.testPicker
+	}
+	if !ui.Interactive(cmd.InOrStdin(), cmd.ErrOrStderr()) {
+		return nil
+	}
+	return ui.HuhPicker(cmd.InOrStdin(), cmd.ErrOrStderr())
 }
 
 // runner returns the Runner subcommands use to call Apple's tools.
@@ -71,27 +98,47 @@ see every underlying command.`,
 	root.PersistentFlags().BoolVarP(&opts.verbose, "verbose", "v", false, "print every underlying command before it runs")
 
 	root.AddCommand(
+		newBuildCommand(opts),
+		newConfigCommand(opts),
 		newDevicesCommand(opts),
+		newInitCommand(opts),
 		newSimulatorsCommand(opts),
 		newVersionCommand(info),
 	)
 	return root
 }
 
+// exitInterrupted is the conventional exit status after Ctrl-C (128 + SIGINT).
+const exitInterrupted = 130
+
 // Execute runs runway with the process arguments and returns the exit code.
+//
+// The first SIGINT/SIGTERM cancels the command's context, which interrupts
+// child processes (see xcode.ExecRunner) so they can clean up. After that the
+// default signal handling is restored, so a second Ctrl-C exits immediately.
 func Execute(info BuildInfo) int {
-	return execute(info, os.Args[1:], os.Stdout, os.Stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return execute(ctx, info, os.Args[1:], os.Stdout, os.Stderr)
 }
 
-func execute(info BuildInfo, args []string, stdout, stderr io.Writer) int {
+func execute(ctx context.Context, info BuildInfo, args []string, stdout, stderr io.Writer) int {
 	root := NewRootCommand(info)
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return 0
+	}
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		fmt.Fprintln(stderr, "runway: interrupted")
+		return exitInterrupted
 	}
 	fmt.Fprintf(stderr, "runway: %v\n", err)
 	if ec, ok := errors.AsType[ExitCoder](err); ok && ec.ExitCode() > 0 {

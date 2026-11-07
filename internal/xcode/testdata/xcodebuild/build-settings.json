@@ -1,0 +1,20 @@
+[
+  {
+    "action": "build",
+    "buildSettings": {
+      "WRAPPER_EXTENSION": "app",
+      "WRAPPER_NAME": "Sensors.app",
+      "TARGET_BUILD_DIR": "/Users/tester/MyProject/.build/runway/Build/Products/Debug-iphonesimulator",
+      "PRODUCT_BUNDLE_IDENTIFIER": "com.github.example.Sensors",
+      "PLATFORM_NAME": "iphonesimulator",
+      "PRODUCT_NAME": "Sensors",
+      "FULL_PRODUCT_NAME": "Sensors.app",
+      "EXECUTABLE_NAME": "Sensors",
+      "CONFIGURATION": "Debug",
+      "SDK_NAME": "iphonesimulator27.2",
+      "TARGET_NAME": "Sensors",
+      "BUILT_PRODUCTS_DIR": "/Users/tester/MyProject/.build/runway/Build/Products/Debug-iphonesimulator"
+    },
+    "target": "Sensors"
+  }
+]

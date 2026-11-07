@@ -2,7 +2,9 @@ package xcode
 
 import (
 	"context"
+	"io"
 	"os"
+	"os/exec"
 	"sync"
 )
 
@@ -13,12 +15,20 @@ type FakeResult struct {
 	Err      error  // returned by Output/Run, or by Process.Wait for Start
 	StartErr error  // Start only: fail to start
 	Block    bool   // Start only: run until FakeProcess.Exit is called or ctx is done
+	// EchoStdin (Start only) copies Cmd.Stdin to Cmd.Stdout, like `cat`.
+	// Without it, stdin is read and discarded. Either way a non-blocking
+	// process exits once stdin reaches EOF.
+	EchoStdin bool
 }
 
 // FakeRunner is a Runner for tests. It records every command and returns
 // results scripted with Respond. It is safe for concurrent use.
 type FakeRunner struct {
-	Default FakeResult // used for commands with no scripted result
+	Default FakeResult        // used for commands with no scripted result
+	Paths   map[string]string // executables LookPath finds, name → path
+	// Handler, if set, is asked first; it returns false to fall back to the
+	// results scripted with Respond and then Default.
+	Handler func(Cmd) (FakeResult, bool)
 
 	mu        sync.Mutex
 	calls     []Cmd
@@ -54,6 +64,11 @@ func (f *FakeRunner) record(c Cmd) FakeResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, c)
+	if f.Handler != nil {
+		if r, ok := f.Handler(c); ok {
+			return r
+		}
+	}
 	if r, ok := f.results[Quote(append([]string{c.Name}, c.Args...)...)]; ok {
 		return r
 	}
@@ -88,6 +103,17 @@ func (f *FakeRunner) Start(ctx context.Context, c Cmd) (Process, error) {
 
 	writeTo(c.Stdout, r.Stdout)
 	writeTo(c.Stderr, r.Stderr)
+	if c.Stdin != nil && !r.Block {
+		go func() {
+			dst := io.Discard
+			if r.EchoStdin && c.Stdout != nil {
+				dst = c.Stdout
+			}
+			_, _ = io.Copy(dst, c.Stdin)
+			p.Exit(r.Err)
+		}()
+		return p, nil
+	}
 	if !r.Block {
 		p.Exit(r.Err)
 		return p, nil
@@ -100,6 +126,16 @@ func (f *FakeRunner) Start(ctx context.Context, c Cmd) (Process, error) {
 		}
 	}()
 	return p, nil
+}
+
+// LookPath implements Runner, using Paths.
+func (f *FakeRunner) LookPath(name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p, ok := f.Paths[name]; ok {
+		return p, nil
+	}
+	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
 func writeTo(w interface{ Write([]byte) (int, error) }, b []byte) {

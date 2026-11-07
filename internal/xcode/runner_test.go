@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -225,5 +226,33 @@ func TestFakeProcess(t *testing.T) {
 	p, _ = f.Start(context.Background(), Cmd{Name: "other"})
 	if err := p.Wait(); err == nil || err.Error() != "exit 1" {
 		t.Errorf("Wait() = %v", err)
+	}
+}
+
+func TestLookPath(t *testing.T) {
+	if p, err := (&ExecRunner{}).LookPath("sh"); err != nil || p == "" {
+		t.Errorf("ExecRunner.LookPath(sh) = %q, %v", p, err)
+	}
+	f := &FakeRunner{Paths: map[string]string{"xcbeautify": "/opt/homebrew/bin/xcbeautify"}}
+	if p, err := f.LookPath("xcbeautify"); err != nil || p != "/opt/homebrew/bin/xcbeautify" {
+		t.Errorf("FakeRunner.LookPath(xcbeautify) = %q, %v", p, err)
+	}
+	if _, err := f.LookPath("missing"); !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("FakeRunner.LookPath(missing) err = %v", err)
+	}
+}
+
+func TestFakeStartEchoesStdin(t *testing.T) {
+	f := &FakeRunner{Default: FakeResult{EchoStdin: true}}
+	var out bytes.Buffer
+	p, err := f.Start(context.Background(), Cmd{Name: "cat", Stdin: strings.NewReader("a\nb\n"), Stdout: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "a\nb\n" {
+		t.Errorf("stdout = %q", out.String())
 	}
 }
