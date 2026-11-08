@@ -48,10 +48,12 @@ homebrew_casks:
     # `depends_on arch: :arm64` itself, and Homebrew refuses a versioned
     # `depends_on macos:` next to the former. Xcode 27 needs Tahoe anyway.
     caveats: "runway needs Xcode 27.2 or later."
-    hooks:
-      post:
-        # The binary isn't notarized, and Homebrew quarantines cask downloads.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/runway"]
-          end
+    # The binary isn't notarized, and Homebrew quarantines cask downloads.
+    # GoReleaser's hooks.post would write a `postflight` block, which Homebrew
+    # 7 deprecates in favour of the declarative `postflight_steps`.
+    # {{staged_path}} is Homebrew's token; it is written as a Go template
+    # string so that GoReleaser leaves it alone.
+    custom_block: |
+      postflight_steps do
+        run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/runway"]
+      end
