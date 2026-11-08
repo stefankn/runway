@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="runway logo" width="160">
+</p>
+
 # runway
 
 Build and run Xcode apps from the terminal, the way Xcode's toolbar does.
