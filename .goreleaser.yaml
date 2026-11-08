@@ -44,9 +44,9 @@ homebrew_casks:
       executable: runway
       args: [completion]
       shells: [bash, zsh, fish]
-    custom_block: |
-      depends_on arch: :arm64
-      depends_on macos: :tahoe # Tahoe or later
+    # No depends_on here: GoReleaser adds `depends_on :macos` and
+    # `depends_on arch: :arm64` itself, and Homebrew refuses a versioned
+    # `depends_on macos:` next to the former. Xcode 27 needs Tahoe anyway.
     caveats: "runway needs Xcode 27.2 or later."
     hooks:
       post:
