@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,10 +41,10 @@ func (e *appExitError) ExitCode() int { return e.code }
 
 func newRunCommand(opts *options) *cobra.Command {
 	var (
-		pf                            projectFlags
-		df                            destFlags
-		noBuild, headless, raw, quiet bool
-		env                           []string
+		pf                                  projectFlags
+		df                                  destFlags
+		noBuild, headless, raw, quiet, logs bool
+		env                                 []string
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] [-- app arguments]",
@@ -52,11 +53,13 @@ func newRunCommand(opts *options) *cobra.Command {
 Xcode's Run button. The app's output (print, stdout and stderr) streams to this terminal
 until the app exits or you press Ctrl-C, which also stops the app.
 
-Running again replaces the running copy. Everything after -- is passed to the
-app as launch arguments.`,
+With --logs, the app's unified log (Logger, os_log) is shown too, each line
+prefixed with "log │". Running again replaces the running copy. Everything
+after -- is passed to the app as launch arguments.`,
 		Example: `  runway run --sim
   runway run --sim "iPhone 18 Pro" --env API_URL=http://localhost:8080
   runway run --device "iPhone 13"
+  runway run --sim --logs
   runway run --no-build -- -FeatureFlag YES`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,8 +80,8 @@ app as launch arguments.`,
 			stderr := cmd.ErrOrStderr()
 			st := ui.NewStyler(stderr)
 			s := session{
-				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless,
-				stderr: stderr, st: st,
+				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless, logs: logs,
+				stdout: cmd.OutOrStdout(), stderr: stderr, st: st,
 				status: func(format string, a ...any) {
 					if !quiet {
 						fmt.Fprintln(stderr, st.Bold(fmt.Sprintf(format, a...)))
@@ -112,6 +115,7 @@ app as launch arguments.`,
 	f.StringArrayVar(&env, "env", nil, "set an environment variable for the app (KEY=VALUE, repeatable)")
 	f.BoolVar(&raw, "raw", false, "show xcodebuild's output without xcbeautify")
 	f.BoolVar(&quiet, "quiet", false, "only show build errors and the app's output")
+	f.BoolVar(&logs, "logs", false, "also show the app's unified log (Logger, os_log)")
 	return cmd
 }
 
@@ -123,6 +127,8 @@ type session struct {
 	appArgs  []string
 	env      []string
 	headless bool
+	logs     bool
+	stdout   io.Writer
 	stderr   io.Writer
 	st       ui.Styler
 	status   func(format string, a ...any)
@@ -146,11 +152,16 @@ func (s *session) runOnSimulator(sim xcode.Simulator) error {
 		return err
 	}
 
+	if s.logs {
+		stop := s.startSimLogs(sim)
+		defer stop()
+	}
+
 	s.launching(sim.Name)
 	// The app's stdin is not connected: a console that put the terminal in
 	// raw mode would swallow Ctrl-C.
 	p, err := client.SimLaunch(ctx, sim.UDID, s.app.BundleID, s.appArgs, s.env,
-		xcode.ConsoleIO{Stdout: s.cmd.OutOrStdout(), Stderr: s.stderr})
+		xcode.ConsoleIO{Stdout: s.stdout, Stderr: s.stderr})
 	if err != nil {
 		return err
 	}
@@ -169,12 +180,21 @@ func (s *session) runOnDevice(dev xcode.Device) error {
 		return err
 	}
 
+	env := s.env
+	if s.logs {
+		// Devices can't stream their log to the Mac. This environment
+		// variable makes the app mirror its Logger / os_log messages to
+		// stderr, which devicectl's console shows (see docs/device-logs.md).
+		env = append(slices.Clone(env), "OS_ACTIVITY_DT_MODE=1")
+		fmt.Fprintln(s.stderr, s.st.Dim("--logs on a device: Logger messages are mirrored to the app's console (OS_ACTIVITY_DT_MODE=1)"))
+	}
+
 	s.launching(dev.Name)
 	// devicectl's error messages (locked device, untrusted developer, …) go to
 	// stderr; watch them for hints.
 	hints := newHintScanner()
-	p, err := client.DeviceLaunch(ctx, dev.UDID, s.app.BundleID, s.appArgs, s.env,
-		xcode.ConsoleIO{Stdout: s.cmd.OutOrStdout(), Stderr: io.MultiWriter(s.stderr, hints)})
+	p, err := client.DeviceLaunch(ctx, dev.UDID, s.app.BundleID, s.appArgs, env,
+		xcode.ConsoleIO{Stdout: s.stdout, Stderr: io.MultiWriter(s.stderr, hints)})
 	if err != nil {
 		return err
 	}
@@ -191,6 +211,55 @@ func (s *session) runOnDevice(dev xcode.Device) error {
 			_ = client.DeviceTerminate(stopCtx, dev.UDID, pid)
 		}
 	})
+}
+
+// logDrain is how long run --logs keeps streaming after the app has exited
+// by itself, for its last messages to arrive.
+var logDrain = 500 * time.Millisecond
+
+// startSimLogs streams the app's unified log into the run output, each line
+// prefixed with "log │". It returns once the stream is running, so messages
+// from the app's launch are seen. A failure is a warning: the app still runs.
+// The returned function stops the stream.
+func (s *session) startSimLogs(sim xcode.Simulator) (stop func()) {
+	ctx := s.cmd.Context()
+	sub := s.t.logSubsystem
+	if sub == "" {
+		sub = s.app.BundleID
+	}
+	// The console and the log stream write from different goroutines.
+	out := &syncWriter{w: s.stdout}
+	s.stdout = out
+	printer := &logPrinter{w: out, st: ui.NewStyler(s.cmd.OutOrStdout()), prefix: ui.NewStyler(s.cmd.OutOrStdout()).Dim("log │ ")}
+	pw := printer.writer()
+	ls, err := s.t.client.SimLogStream(ctx, sim.UDID, xcode.LogFilter{Subsystem: sub},
+		xcode.LogOutput{Stdout: pw, Stderr: s.stderr})
+	if err != nil {
+		fmt.Fprintln(s.stderr, s.st.Yellow("warning: ")+err.Error())
+		return func() {}
+	}
+	ls.WaitStarted(ctx)
+	return func() {
+		// A stream that ended before the app did failed (e.g. a bad
+		// predicate); one that runway stops ends with an error by design.
+		var endedEarly bool
+		select {
+		case <-ls.Done():
+			endedEarly = true
+		default:
+		}
+		if !endedEarly && ctx.Err() == nil {
+			select {
+			case <-ls.Done():
+			case <-time.After(logDrain):
+			}
+		}
+		stopLogStream(ctx, ls)
+		pw.Flush()
+		if err := ls.Wait(); endedEarly && err != nil {
+			fmt.Fprintln(s.stderr, s.st.Yellow("warning: ")+err.Error())
+		}
+	}
 }
 
 func (s *session) launching(where string) {

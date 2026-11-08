@@ -301,3 +301,38 @@ func TestDefaultDevicePrefersIOS(t *testing.T) {
 		t.Errorf("only a TV: got %+v, %v; want the TV as fallback", d.Device, err)
 	}
 }
+
+func TestPreferBooted(t *testing.T) {
+	never := func(string, []string) (int, error) {
+		t.Error("picker shown although one simulator is booted")
+		return 0, nil
+	}
+	for _, tc := range []struct {
+		name string
+		req  Request
+		pick ui.Picker
+		want string
+	}{
+		{"nothing given", Request{PreferBooted: true}, nil, "iPad (A16)"},
+		{"nothing given, interactive", Request{PreferBooted: true}, never, "iPad (A16)"},
+		{"bare --sim", Request{Sim: ptr(""), PreferBooted: true}, nil, "iPad (A16)"},
+		{"configured sim", Request{Configured: "sim", PreferBooted: true}, nil, "iPad (A16)"},
+		{"named --sim wins", Request{Sim: ptr("iPhone Air"), PreferBooted: true}, nil, "iPhone Air"},
+		{"off", Request{Sim: ptr("")}, nil, "iPhone 17"},
+	} {
+		d, err := resolve(t, tc.req, tc.pick)
+		if err != nil || d.Simulator == nil || d.Simulator.Name != tc.want {
+			t.Errorf("%s: got %v, %v; want %s", tc.name, d, err, tc.want)
+		}
+	}
+}
+
+func TestPreferBootedSeveralBooted(t *testing.T) {
+	// Boot a second simulator: runway can't tell which one is meant.
+	sims := strings.Replace(string(fixture(t, "simctl/devices-available.json")), `"Shutdown"`, `"Booted"`, 1)
+	c, _ := client(t, []byte(sims), nil, nil)
+	d, err := Resolve(context.Background(), c, Request{Sim: ptr(""), PreferBooted: true}, nil)
+	if err != nil || d.Simulator == nil || d.Simulator.Name != "iPhone 18 Pro" {
+		t.Errorf("got %v, %v; want the default simulator", d, err)
+	}
+}

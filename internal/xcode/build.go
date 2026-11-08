@@ -23,14 +23,15 @@ type BuildOptions struct {
 }
 
 // settingsArgs are the arguments shared by build and -showBuildSettings.
+// Without a Destination (only for -showBuildSettings, e.g. to read the
+// bundle ID), xcodebuild uses the scheme's default.
 func (o BuildOptions) settingsArgs() []string {
 	args := append([]string{}, o.Container.Args()...)
-	return append(args,
-		"-scheme", o.Scheme,
-		"-configuration", o.Configuration,
-		"-destination", o.Destination,
-		"-derivedDataPath", o.DerivedData,
-	)
+	args = append(args, "-scheme", o.Scheme, "-configuration", o.Configuration)
+	if o.Destination != "" {
+		args = append(args, "-destination", o.Destination)
+	}
+	return append(args, "-derivedDataPath", o.DerivedData)
 }
 
 // BuildArgs returns the xcodebuild arguments for a build.

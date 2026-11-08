@@ -173,7 +173,7 @@ Streams unified logging for the app, filtered by default to `subsystem == "<log_
 
 Don't guess about these. Check each against Xcode 27.2 and record the result in a comment or in `docs/`:
 
-> Results so far are in [`docs/xcode-notes.md`](docs/xcode-notes.md) (items 1, 2, 3, 5 and 6 checked).
+> Results so far are in [`docs/xcode-notes.md`](docs/xcode-notes.md) (items 1, 2, 3, 5 and 6 checked; item 4 in [`docs/device-logs.md`](docs/device-logs.md)).
 1. The exact devicectl JSON (version 5): the keys inside `properties` that give name, UDID, OS version, model, platform, connection or tunnel state, pairing state and Developer Mode.
 2. Whether `devicectl … --json-output -` mixes any non-JSON text into stdout.
 3. What `simctl launch --console-pty` and `devicectl … launch --console` do on SIGINT: does the app keep running?

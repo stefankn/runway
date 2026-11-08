@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Simulator is an available simulator, as reported by simctl.
@@ -166,3 +167,23 @@ func SimulatorDestination(s Simulator) string {
 func DeviceDestination(d Device) string {
 	return "platform=" + normalizePlatform(d.Platform) + ",id=" + d.UDID
 }
+
+// LogEntry is one unified logging (Logger / os_log) message.
+type LogEntry struct {
+	Time      time.Time `json:"time"`
+	Level     string    `json:"level"` // LevelDebug … LevelFault
+	Subsystem string    `json:"subsystem,omitempty"`
+	Category  string    `json:"category,omitempty"`
+	Process   string    `json:"process"` // executable name
+	PID       int       `json:"pid"`
+	Message   string    `json:"message"`
+}
+
+// Log levels, from least to most severe.
+const (
+	LevelDebug   = "debug"
+	LevelInfo    = "info"
+	LevelDefault = "default" // Logger.notice / Logger.log
+	LevelError   = "error"
+	LevelFault   = "fault"
+)

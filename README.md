@@ -43,6 +43,7 @@ runway run --sim "iPhone 18 Pro"
 | Command | What it does |
 |---|---|
 | `runway run` | Build, install and launch the app, then stream its console until it exits or you press Ctrl-C |
+| `runway logs` | Stream the app's unified log (`Logger`, `os_log`) from a simulator |
 | `runway build` | Build the app for a simulator or device |
 | `runway simulators` | List available simulators |
 | `runway devices` | List connected and paired physical devices |
@@ -55,7 +56,7 @@ Run `runway <command> --help` to see all flags and examples.
 
 ### Choosing a destination
 
-`build` and `run` accept:
+`build`, `run` and `logs` accept:
 
 - `--sim [name|UDID]`: a simulator. With no value, runway uses the configured default, or else an iPhone on the newest iOS runtime.
 - `--device [name|UDID]`: a physical device. With no value, runway uses the first connected device, preferring a wired connection over the network.
@@ -70,9 +71,28 @@ runway run --sim
 runway run --sim "iPhone 18 Pro" --env API_URL=http://localhost:8080
 runway run --device "iPhone 13"
 runway run --no-build -- -FeatureFlag YES     # arguments after -- go to the app
+runway run --sim --logs                       # also show Logger / os_log messages
 ```
 
 The app's `print()`, stdout and stderr appear live. Ctrl-C stops the app, just like Xcode's Stop button. Running again replaces the copy that is already running. Use `--headless` to keep the simulator window in the background.
+
+`Logger` and `os_log` messages go to the unified log, not to stdout, so `run` doesn't show them by default. Add `--logs` to see them in the same terminal, each prefixed with `log │`. On a device, `--logs` sets `OS_ACTIVITY_DT_MODE=1` for the app instead, which makes it copy those messages (info and above) to its console (see [docs/device-logs.md](docs/device-logs.md)).
+
+### logs
+
+```sh
+runway logs                              # the booted simulator, filtered to the app's subsystem
+runway logs --level info --category network
+runway logs --all                        # everything, with process names
+runway logs --predicate 'messageType == error'
+runway logs --last 10m                   # recent messages instead of a live stream
+runway logs --device --last 5m           # devices can only show recent messages
+runway logs --archive device.logarchive  # a log archive collected earlier
+```
+
+By default `logs` shows messages whose subsystem is `log_subsystem` from the configuration, or else the app's bundle ID. Without `--sim` or `--device` it uses the booted simulator when exactly one is booted. `--json` prints the log tool's NDJSON unchanged.
+
+Physical devices can't stream their log to the command line. For live messages from a device, use `runway run --device --logs`. For recent ones, `logs --device --last 5m` uses `log collect`, which needs root for a device: runway prints the `sudo log collect` command to run, and you can then read the result with `runway logs --archive`. Details are in [docs/device-logs.md](docs/device-logs.md).
 
 ### build
 
@@ -113,6 +133,7 @@ configuration = "Debug"
 team          = "ABCDE12345"          # DEVELOPMENT_TEAM
 destination   = "sim:iPhone 18 Pro"   # or "device:<name or UDID>", or "device" for the first connected one
 derived_data  = ".build/runway"       # the default; relative to the file
+log_subsystem = "com.example.MyApp"   # for logs and run --logs; defaults to the bundle ID
 ```
 
 Run `runway config` to see the resolved value of each setting and where it came from. If you use the default derived data folder, add `.build/` to your `.gitignore`.

@@ -53,10 +53,11 @@ Everything after -- is passed to xcodebuild unchanged.`,
 
 // target is what to build and where: shared by build and run.
 type target struct {
-	client  *xcode.Client
-	project project.Project
-	dest    destination.Destination
-	cwd     string
+	client       *xcode.Client
+	project      project.Project
+	dest         destination.Destination
+	cwd          string
+	logSubsystem string // configured log_subsystem; empty means the bundle ID
 }
 
 // resolveTarget resolves the project (flags, env, .runway.toml, detection)
@@ -84,7 +85,7 @@ func (o *options) resolveTarget(cmd *cobra.Command, args []string, pf *projectFl
 	if err != nil {
 		return target{}, err
 	}
-	return target{client: client, project: p, dest: dest, cwd: cwd}, nil
+	return target{client: client, project: p, dest: dest, cwd: cwd, logSubsystem: cfg.LogSubsystem}, nil
 }
 
 func (t target) buildOptions(quiet bool) xcode.BuildOptions {

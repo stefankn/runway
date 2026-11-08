@@ -17,6 +17,10 @@ type Request struct {
 	Raw         string  // --destination, passed to xcodebuild unchanged
 	Configured  string  // "sim", "sim:<name or UDID>", "device" or "device:<name or UDID>"
 	Source      string  // where Configured came from, for error messages
+	// PreferBooted makes an unspecified simulator ("--sim" without a value,
+	// or nothing at all) resolve to the booted one, if exactly one is
+	// booted. For commands that attach to a running app, such as logs.
+	PreferBooted bool
 }
 
 // Destination is a resolved build/run target. Exactly one of Simulator and
@@ -54,7 +58,7 @@ func Resolve(ctx context.Context, client *xcode.Client, req Request, pick ui.Pic
 	case req.Raw != "":
 		return Destination{Spec: req.Raw}, nil
 	case req.Sim != nil:
-		return simulator(ctx, client, *req.Sim, pick)
+		return simulator(ctx, client, *req.Sim, pick, req.PreferBooted)
 	case req.Device != nil:
 		return device(ctx, client, *req.Device, pick)
 	case req.Configured != "":
@@ -64,14 +68,37 @@ func Resolve(ctx context.Context, client *xcode.Client, req Request, pick ui.Pic
 				req.Configured, req.Source)
 		}
 		if kind == "sim" {
-			return simulator(ctx, client, query, pick)
+			return simulator(ctx, client, query, pick, req.PreferBooted)
 		}
 		return device(ctx, client, query, pick)
-	case pick != nil:
-		return pickAny(ctx, client, pick)
-	default:
-		return simulator(ctx, client, "", nil)
 	}
+	if req.PreferBooted {
+		sims, err := client.ListSimulators(ctx)
+		if err != nil {
+			return Destination{}, err
+		}
+		if s, ok := onlyBooted(sims); ok {
+			return fromSimulator(s), nil
+		}
+	}
+	if pick != nil {
+		return pickAny(ctx, client, pick)
+	}
+	return simulator(ctx, client, "", nil, req.PreferBooted)
+}
+
+// onlyBooted returns the booted simulator, if exactly one is booted.
+func onlyBooted(sims []xcode.Simulator) (xcode.Simulator, bool) {
+	var booted []xcode.Simulator
+	for _, s := range sims {
+		if s.Booted() {
+			booted = append(booted, s)
+		}
+	}
+	if len(booted) != 1 {
+		return xcode.Simulator{}, false
+	}
+	return booted[0], true
 }
 
 func parseConfigured(s string) (kind, query string, err error) {
@@ -85,13 +112,18 @@ func parseConfigured(s string) (kind, query string, err error) {
 	return "", "", fmt.Errorf("unknown destination kind %q", kind)
 }
 
-func simulator(ctx context.Context, client *xcode.Client, query string, pick ui.Picker) (Destination, error) {
+func simulator(ctx context.Context, client *xcode.Client, query string, pick ui.Picker, preferBooted bool) (Destination, error) {
 	sims, err := client.ListSimulators(ctx)
 	if err != nil {
 		return Destination{}, err
 	}
 	if len(sims) == 0 {
 		return Destination{}, fmt.Errorf("no simulators available; add one in Xcode (Window → Devices and Simulators)")
+	}
+	if query == "" && preferBooted {
+		if s, ok := onlyBooted(sims); ok {
+			return fromSimulator(s), nil
+		}
 	}
 	if query == "" {
 		s, ok := defaultSimulator(sims)

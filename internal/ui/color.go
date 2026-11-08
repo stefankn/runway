@@ -50,3 +50,6 @@ func (s Styler) Yellow(text string) string { return s.wrap("33", text) }
 
 // Green renders text green.
 func (s Styler) Green(text string) string { return s.wrap("32", text) }
+
+// Red renders text red.
+func (s Styler) Red(text string) string { return s.wrap("31", text) }

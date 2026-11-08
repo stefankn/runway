@@ -140,6 +140,42 @@ instead of `simctl boot`, so `install` never runs on a half-booted simulator.
   `sandbox_extension_issue_file … Operation not permitted`. This only affects
   sandboxed development environments, not normal use.
 
-## Still to check
+## Simulator log stream (`simctl spawn … log stream`)
 
-- §8.4 streaming `os_log` from a physical device (Milestone 7)
+Checked 2026-11-08 on an iOS 27.2 simulator:
+
+- `xcrun simctl spawn <udid> log stream --style ndjson --level debug` writes
+  only NDJSON to stdout. Besides `logEvent` lines there are other event types
+  (e.g. `activityCreateEvent`), which runway skips. stderr carries noise such
+  as `getpwuid_r did not find a match for uid 501`.
+- **Stopping it is the hard part.** `simctl spawn` ignores SIGINT and SIGTERM,
+  and even `kill -9` on simctl leaves the `log` process inside the simulator
+  running. That process is started by `launchd_sim`, so it is not in runway's
+  process group. It only dies by itself when its stdout is closed *and* it next
+  writes; with a narrow predicate that write may never come.
+- What works: SIGINT to the in-simulator `log` process's PID, either from the
+  host (`kill -INT <pid>`) or through `xcrun simctl spawn <udid> /bin/kill -INT
+  <pid>`. Plain `kill` is not on the simulator's PATH (ENOENT); use `/bin/kill`.
+  Simulator processes are visible to host `pgrep`.
+- So runway (`LogStream.Stop` in `internal/xcode/logstream.go`) adds a unique
+  term to the predicate (`eventMessage != "runway-<random>"`), finds the
+  in-simulator process with `pgrep -f '^log stream .*runway-<random>'` (the
+  `^log stream` excludes simctl, whose command line contains the marker
+  too), sends it SIGINT with `kill -INT <pid>`, and only then stops simctl.
+- With a predicate, `log` also prints `Filtering the log data using "…"`. The
+  fixture `testdata/log/stream.ndjson` starts with that line so the parser is
+  tested against it. All its other lines are real output, captured from
+  system processes in the simulator.
+- `log show` has no `--level`: it takes `--info` and `--debug` flags instead.
+- When interrupted, `log stream --style ndjson` prints a final summary line,
+  `{"count":30,"finished":1}`, which is not a log event.
+- Verified 2026-11-08 outside the sandbox with the sample app: `runway logs`
+  and `runway run --sim --logs` stop their `log` process on Ctrl-C and when
+  the app exits by itself (`pgrep -fl "^log stream"` finds nothing afterwards).
+
+## §8.4 Device logs
+
+See [device-logs.md](device-logs.md): devicectl can't stream device logs.
+runway uses `OS_ACTIVITY_DT_MODE=1` for `run --device --logs` (verified on an
+iPad) and `log collect` + `log show` for `logs --device --last` (`log collect`
+needs root, so runway prints the `sudo` command and `logs --archive`).
