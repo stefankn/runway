@@ -9,8 +9,19 @@ import (
 	"github.com/stefankn/runway/internal/destination"
 )
 
-// noValue marks --sim or --device given without a value.
-const noValue = "\x00"
+// noValue marks --sim or --device given without a value. It must be "true":
+// together with optionalArg's "boolfunc" type, that keeps pflag from printing
+// a type or a default in the help, so it reads "--sim [name|UDID]". The cost is
+// that an explicit --sim=true also means "no value".
+const noValue = "true"
+
+// optionalArg is a string flag whose value may be left out (--sim, or
+// --sim=<name>). It stores into a plain string.
+type optionalArg struct{ s *string }
+
+func (a optionalArg) String() string     { return *a.s }
+func (a optionalArg) Set(v string) error { *a.s = v; return nil }
+func (a optionalArg) Type() string       { return "boolfunc" } // see noValue
 
 // destFlags choose where to build and run: --sim, --device or --destination.
 // They are shared by build, run and logs.
@@ -20,9 +31,9 @@ type destFlags struct {
 
 func (f *destFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
-	fl.StringVar(&f.sim, "sim", "", "use a simulator, by name or UDID (default: an iPhone on the newest iOS)")
+	fl.Var(optionalArg{&f.sim}, "sim", "use the simulator `[name|UDID]`; without a value, an iPhone on the newest iOS")
 	fl.Lookup("sim").NoOptDefVal = noValue
-	fl.StringVar(&f.device, "device", "", "use a physical device, by name or UDID (default: the first connected one)")
+	fl.Var(optionalArg{&f.device}, "device", "use the physical device `[name|UDID]`; without a value, the first connected one")
 	fl.Lookup("device").NoOptDefVal = noValue
 	fl.StringVar(&f.raw, "destination", "", "raw xcodebuild -destination value, passed unchanged")
 	cmd.MarkFlagsMutuallyExclusive("sim", "device", "destination")

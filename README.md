@@ -18,6 +18,16 @@ runway run --device           # same, on the first connected iPhone or iPad
 
 ## Installation
 
+With Homebrew:
+
+```sh
+brew install stefankn/tap/runway
+```
+
+This also installs shell completions for zsh, bash and fish. Update with `brew upgrade runway`.
+
+Homebrew has an unrelated package that is also called `runway`, so always use the full name `stefankn/tap/runway` to install, and don't install both.
+
 From source, with Go 1.27 or later:
 
 ```sh
@@ -25,8 +35,6 @@ go install github.com/stefankn/runway/cmd/runway@latest
 ```
 
 Or clone the repository and run `just build`, which writes the binary to `bin/runway`.
-
-A Homebrew formula is planned.
 
 ## Quick start
 
@@ -152,4 +160,10 @@ just test     # unit tests (no Xcode needed)
 just ci       # everything CI checks: tidy, formatting, vet, staticcheck, tests
 ```
 
+To release, run through `docs/smoke-test.md`, check the packaging with `just release-check` (a local GoReleaser dry run into `dist/`), and then run `just release 0.2.0`. After its checks and a confirmation, it pushes the `v0.2.0` tag. GitHub Actions then publishes the release and updates the Homebrew cask in [stefankn/homebrew-tap](https://github.com/stefankn/homebrew-tap).
+
 `PLAN.md` describes the design and the roadmap. `docs/xcode-notes.md` records what has been verified about Xcode 27.2's tools.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

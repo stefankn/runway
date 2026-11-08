@@ -76,3 +76,23 @@ func TestVerboseFlagReachesRunner(t *testing.T) {
 		}
 	}
 }
+
+// The optional value of --sim/--device must read well in the help (it used
+// to show the internal sentinel as `string[="  "]`).
+func TestDestinationFlagsHelp(t *testing.T) {
+	for _, cmd := range []string{"build", "run", "logs"} {
+		var out, errOut bytes.Buffer
+		if code := execute(context.Background(), testInfo, []string{cmd, "--help"}, &out, &errOut); code != 0 {
+			t.Fatalf("%s --help: exit %d, %s", cmd, code, errOut.String())
+		}
+		help := out.String()
+		for _, want := range []string{"--sim [name|UDID]  ", "--device [name|UDID]  "} {
+			if !strings.Contains(help, want) {
+				t.Errorf("%s --help is missing %q:\n%s", cmd, want, help)
+			}
+		}
+		if strings.Contains(help, `[="`) || strings.Contains(help, "[=true]") {
+			t.Errorf("%s --help shows a flag default:\n%s", cmd, help)
+		}
+	}
+}

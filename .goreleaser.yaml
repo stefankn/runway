@@ -1,0 +1,57 @@
+# GoReleaser configuration (https://goreleaser.com). A pushed v* tag runs this
+# in .github/workflows/release.yml; `just release-check` does a local dry run.
+version: 2
+project_name: runway
+
+builds:
+  - main: ./cmd/runway
+    binary: runway
+    env: [CGO_ENABLED=0]
+    goos: [darwin]
+    goarch: [arm64] # Xcode 27 only runs on Apple silicon
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:"]
+
+# Updates Casks/runway.rb in github.com/stefankn/homebrew-tap, so that
+# `brew install stefankn/tap/runway` installs the release.
+homebrew_casks:
+  - name: runway
+    repository:
+      owner: stefankn
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/stefankn/runway
+    description: Build, run and stream logs for Xcode apps from the terminal
+    license: MIT
+    binaries: [runway]
+    generate_completions_from_executable:
+      executable: runway
+      args: [completion]
+      shells: [bash, zsh, fish]
+    custom_block: |
+      depends_on arch: :arm64
+      depends_on macos: :tahoe # Tahoe or later
+    caveats: "runway needs Xcode 27.2 or later."
+    hooks:
+      post:
+        # The binary isn't notarized, and Homebrew quarantines cask downloads.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/runway"]
+          end

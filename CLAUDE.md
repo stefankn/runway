@@ -16,8 +16,14 @@ Tasks live in the `justfile` (`just` lists them):
 - `just lint`: `go vet` + staticcheck (pinned version, run via `go run`)
 - `just fmt` / `just fmt-check`
 - `just ci`: everything CI runs (`go mod tidy -diff`, fmt-check, lint, test). Run this before declaring work done.
+- `just release-check`: `goreleaser check` plus a snapshot build into `dist/` (publishes nothing)
+- `just release X.Y.Z`: tags and pushes `vX.Y.Z` after checks (clean `main` equal to `origin/main`, new tag, `just ci`) and a confirmation prompt. Only the user runs this.
 
 Unit tests need no Xcode.
+
+## Releasing
+
+A pushed `v*` tag runs `.github/workflows/release.yml`: unit tests, then GoReleaser (`.goreleaser.yaml`). It builds `darwin/arm64` only, publishes a GitHub release, and updates the cask `Casks/runway.rb` in `stefankn/homebrew-tap` using the `HOMEBREW_TAP_GITHUB_TOKEN` secret. The cask generates shell completions from `runway completion` and removes the quarantine attribute (the binary isn't notarized). Before a release, run through `docs/smoke-test.md`.
 
 ## Architecture
 
