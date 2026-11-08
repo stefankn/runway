@@ -54,6 +54,7 @@ runway run --sim "iPhone 18 Pro"
 |---|---|
 | `runway run` | Build, install and launch the app, then stream its console until it exits or you press Ctrl-C |
 | `runway logs` | Stream the app's unified log (`Logger`, `os_log`) from a simulator |
+| `runway screenshot` | Save a screenshot of a simulator's screen |
 | `runway build` | Build the app for a simulator or device |
 | `runway simulators` | List available simulators |
 | `runway devices` | List connected and paired physical devices |
@@ -84,11 +85,14 @@ runway run --device "iPhone 13"
 runway run --no-build -- -FeatureFlag YES     # arguments after -- go to the app
 runway run --sim --logs                       # also show Logger / os_log messages
 runway run --sim --timeout 30s                # stop the app after 30 seconds
+runway run --sim --until 'Loaded \d+ items'    # stop once the output matches
 ```
 
 The app's `print()`, stdout and stderr appear live. Ctrl-C stops the app, just like Xcode's Stop button. Running again replaces the copy that is already running. Use `--headless` to keep the simulator window in the background.
 
 `--timeout` stops the app once it has run for the given time and exits with status 0, which is useful in scripts and for AI agents. The time starts when the app launches, so the build doesn't count. If the app exits first, runway exits with the app's status.
+
+`--until <regexp>` stops the app and exits with status 0 as soon as a line of its output matches: stdout, stderr, and with `--logs` the log lines (matched as shown, including the `log │` prefix). Combine it with `--timeout`: if the time runs out first, runway exits with status 1, and if the app exits first, with the app's status (or 1 if that was 0). A script or agent can then check that the app reached a given state.
 
 `Logger` and `os_log` messages go to the unified log, not to stdout, so `run` doesn't show them by default. Add `--logs` to see them in the same terminal, each prefixed with `log │`. On a device, `--logs` sets `OS_ACTIVITY_DT_MODE=1` for the app instead, which makes it copy those messages (info and above) to its console (see [docs/device-logs.md](docs/device-logs.md)).
 
@@ -118,6 +122,15 @@ runway build -- -showBuildTimingSummary       # arguments after -- go to xcodebu
 
 When the build succeeds, runway prints the app path and bundle ID. Use `--raw` to skip xcbeautify, or `--quiet` to see only errors and the result. For common failures, such as signing, Developer Mode or a missing destination, runway prints a hint after Xcode's own error.
 
+### screenshot
+
+```sh
+runway screenshot                                   # the booted simulator
+runway screenshot --sim "iPhone 18 Pro" -o shots/home.png
+```
+
+Saves a screenshot of a booted simulator and prints the file's path. Without `-o`, the file is `screenshot-<date>-<time>.png` in the current folder. The extension picks the format: `.png`, `.jpg`, `.tiff`, `.bmp` or `.gif`. Physical devices aren't supported.
+
 ### simulators and devices
 
 ```sh
@@ -130,7 +143,7 @@ Both commands accept `--json`, which prints runway's own JSON instead of a table
 
 ## AI coding agents
 
-runway works well for AI coding agents such as Claude Code: it never prompts when it isn't run in a terminal, turns colour off, has JSON output for the commands an agent reads, and passes on exit codes. `runway skill` prints an Agent Skill (`SKILL.md`) that tells an agent how to use it, for example to always pass `--timeout` and `--headless` to `run`.
+runway works well for AI coding agents such as Claude Code: it never prompts when it isn't run in a terminal, turns colour off, has JSON output for the commands an agent reads, and passes on exit codes. `runway skill` prints an Agent Skill (`SKILL.md`) that tells an agent how to use it, for example to always pass `--timeout` and `--headless` to `run`, and to use `--until` and `screenshot` to check its work.
 
 ```sh
 runway skill install            # for Claude Code, in ~/.claude/skills (all projects)

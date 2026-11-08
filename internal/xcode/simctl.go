@@ -168,6 +168,17 @@ func (c *Client) SimTerminate(ctx context.Context, udid, bundleID string) error 
 	return nil
 }
 
+// SimScreenshot saves a screenshot of a booted simulator's screen to path.
+// format is simctl's --type: png, jpeg, tiff, bmp or gif. Without --type,
+// simctl guesses from the extension but writes PNG data for one it doesn't
+// know, so it is always passed. An existing file is overwritten.
+func (c *Client) SimScreenshot(ctx context.Context, udid, path, format string) error {
+	if _, err := c.r.Output(ctx, xcrun("simctl", "io", udid, "screenshot", "--type="+format, path)); err != nil {
+		return fmt.Errorf("taking screenshot: %w", err)
+	}
+	return nil
+}
+
 // OpenDeviceHub brings the DeviceHub window (which shows simulators) to the front.
 func (c *Client) OpenDeviceHub(ctx context.Context) error {
 	if _, err := c.r.Output(ctx, Cmd{Name: "open", Args: []string{"-b", DeviceHubBundleID}}); err != nil {

@@ -271,7 +271,7 @@ func TestRunTimeout(t *testing.T) {
 		if !slices.ContainsFunc(flow(f, 5), func(s string) bool { return strings.HasPrefix(s, tc.stopCmd) }) {
 			t.Errorf("%s: app was not stopped: %q", tc.dest, flow(f, 5))
 		}
-		for _, s := range []string{"(stops after 50ms, or Ctrl-C)", "Stopped the app after 50ms (--timeout)"} {
+		for _, s := range []string{"(stops after 50ms; Ctrl-C to stop)", "Stopped the app after 50ms (--timeout)"} {
 			if !strings.Contains(errOut, s) {
 				t.Errorf("%s: stderr is missing %q:\n%s", tc.dest, s, errOut)
 			}
@@ -301,6 +301,107 @@ func TestRunRejectsNegativeTimeout(t *testing.T) {
 	}
 	if hasCommand(f, "xcodebuild build") {
 		t.Error("built before rejecting --timeout")
+	}
+}
+
+// runUntil runs `run` with args in the background and returns its result,
+// failing the test if it doesn't return.
+func runUntil(t *testing.T, opts *options, args ...string) (errOut string, err error) {
+	t.Helper()
+	type result struct {
+		errOut string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, errOut, err := runOpts(t, opts, args...)
+		done <- result{errOut, err}
+	}()
+	select {
+	case r := <-done:
+		return r.errOut, r.err
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%q did not return", args)
+		return "", nil
+	}
+}
+
+func TestRunUntil(t *testing.T) {
+	for _, tc := range []struct {
+		name, dest, until, stopCmd string
+		launch                     xcode.FakeResult
+	}{
+		{"stdout", "--sim", `Loaded \d+ items`, "xcrun simctl terminate",
+			xcode.FakeResult{Block: true, Stdout: []byte("starting\nLoaded 20 items\n")}},
+		{"stderr", "--device", "Fatal error", "xcrun devicectl device process terminate",
+			xcode.FakeResult{Block: true, Stderr: []byte("App/Model.swift:12: Fatal error: boom\n")}},
+		{"colours", "--sim", "^Ready$", "xcrun simctl terminate",
+			xcode.FakeResult{Block: true, Stdout: []byte("\x1b[32mReady\x1b[0m\n")}},
+	} {
+		dir, appPath := runSetup(t, true)
+		f := runFake(t, appPath, tc.launch, xcode.FakeResult{})
+		errOut, err := runUntil(t, &options{workDir: dir, testRunner: f}, "run", tc.dest, "--headless", "--until", tc.until, "--timeout", "1m")
+		if err != nil {
+			t.Errorf("%s: err = %v, want nil (exit 0)", tc.name, err)
+		}
+		if !slices.ContainsFunc(flow(f, 5), func(s string) bool { return strings.HasPrefix(s, tc.stopCmd) }) {
+			t.Errorf("%s: app was not stopped: %q", tc.name, flow(f, 5))
+		}
+		for _, s := range []string{"(stops when output matches --until or after 1m0s; Ctrl-C to stop)", "Stopped the app: output matched --until"} {
+			if !strings.Contains(errOut, s) {
+				t.Errorf("%s: stderr is missing %q:\n%s", tc.name, s, errOut)
+			}
+		}
+	}
+}
+
+func TestRunUntilMatchesLogs(t *testing.T) {
+	drain := logDrain
+	logDrain = time.Millisecond
+	t.Cleanup(func() { logDrain = drain })
+
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{Block: true}, xcode.FakeResult{})
+	withLogStream(t, f, fixture(t, "log/stream.ndjson"))
+	if _, err := runUntil(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--headless", "--logs", "--until", "log │ .*Simulator is not supported"); err != nil {
+		t.Errorf("err = %v, want a match in the log", err)
+	}
+}
+
+func TestRunUntilNoMatch(t *testing.T) {
+	// --timeout expires first. runway's own messages ("Launching …") don't count.
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{Block: true, Stdout: []byte("nothing to see\n")}, xcode.FakeResult{})
+	_, err := runUntil(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--headless", "--until", "Launching|Ready", "--timeout", "50ms")
+	if err == nil || err.Error() != `no output matched --until "Launching|Ready" within 50ms; stopped the app` {
+		t.Errorf("timeout: err = %v", err)
+	}
+	if !hasCommand(f, "xcrun simctl terminate") {
+		t.Error("timeout: app was not stopped")
+	}
+
+	// The app exits by itself.
+	f = runFake(t, appPath, xcode.FakeResult{Stdout: []byte("bye\n")}, xcode.FakeResult{})
+	_, err = runUntil(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--until", "Ready")
+	if err == nil || err.Error() != `the app exited before its output matched --until "Ready"` {
+		t.Errorf("clean exit: err = %v", err)
+	}
+	f = runFake(t, appPath, xcode.FakeResult{Err: &xcode.ExitError{Cmd: xcode.Cmd{Name: "xcrun"}, Code: 3}}, xcode.FakeResult{})
+	_, err = runUntil(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--until", "Ready")
+	if ec, ok := errors.AsType[ExitCoder](err); !ok || ec.ExitCode() != 3 {
+		t.Errorf("crash: err = %v, want the app's exit status 3", err)
+	}
+}
+
+func TestRunRejectsInvalidUntil(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{}, xcode.FakeResult{})
+	_, _, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--until", "Loaded (")
+	if err == nil || !strings.Contains(err.Error(), "invalid --until: ") {
+		t.Errorf("err = %v", err)
+	}
+	if hasCommand(f, "xcodebuild build") {
+		t.Error("built before rejecting --until")
 	}
 }
 

@@ -162,6 +162,9 @@ func TestSimLifecycleCommands(t *testing.T) {
 	if err := c.OpenDeviceHub(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.SimScreenshot(ctx, udid, "/shots/My Screen.jpg", "jpeg"); err != nil {
+		t.Fatal(err)
+	}
 
 	var got []string
 	for _, cmd := range f.Calls() {
@@ -173,6 +176,7 @@ func TestSimLifecycleCommands(t *testing.T) {
 		"SIMCTL_CHILD_FOO='bar baz' xcrun simctl launch --console-pty --terminate-running-process SIM-1 com.x.app -flag 'two words'",
 		"xcrun simctl terminate SIM-1 com.x.app",
 		"open -b com.apple.dt.Devices",
+		"xcrun simctl io SIM-1 screenshot --type=jpeg '/shots/My Screen.jpg'",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("commands:\n got %q\nwant %q", got, want)
@@ -194,6 +198,7 @@ func TestSimWrappersWrapErrors(t *testing.T) {
 		{c.SimInstall(ctx, "SIM-1", "/a.app"), "installing app: "},
 		{c.SimTerminate(ctx, "SIM-1", "x"), "stopping app: "},
 		{c.OpenDeviceHub(ctx), "opening DeviceHub: "},
+		{c.SimScreenshot(ctx, "SIM-1", "/a.png", "png"), "taking screenshot: "},
 	} {
 		if tc.err == nil || !strings.HasPrefix(tc.err.Error(), tc.want) {
 			t.Errorf("err = %v, want prefix %q", tc.err, tc.want)

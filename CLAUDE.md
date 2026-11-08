@@ -43,7 +43,7 @@ Read this before touching `run`, `Runner`, or signal handling:
 - Every child runs in its own process group (`Setpgid`). On context cancel, `ExecRunner` sends one SIGINT to the group, then kills after `WaitDelay` (3s).
 - `cli.Execute` turns the first SIGINT/SIGTERM/SIGHUP into context cancellation and then restores default handling, so a second Ctrl-C exits immediately. Interrupt exits with status 130.
 - Child exit codes propagate through `ExitCoder` (`*xcode.ExitError`, and `appExitError` in `run.go`).
-- `run --timeout` runs the app under a child context that ends with the cause `errRunTimeout`; `finish` then stops the app as for Ctrl-C but returns nil (exit 0).
+- `run --timeout` and `--until` run the app under a child context that ends with the cause `errRunTimeout` or `errRunUntil` (`--until` cancels `session.runCtx` from `session.watch`, a line watcher on each console stream). `finish` then stops the app as for Ctrl-C and turns the cause into the result: nil after a match or a plain timeout, an error when `--until` never matched.
 - `run` stops the launched app explicitly on Ctrl-C (`simctl terminate` / `devicectl … process terminate`), as Xcode's Stop button does.
 - `log stream` runs inside the simulator via `simctl spawn`, which ignores signals, and the in-simulator `log` survives killing `simctl`. `LogStream` (`logstream.go`) therefore starts it on a detached context with a marker in the predicate (`eventMessage != "runway-<random>"`), finds its PID with `pgrep -f` (simulator processes are host processes), and stops it with `kill -INT`, which makes it exit cleanly. See `docs/xcode-notes.md`.
 

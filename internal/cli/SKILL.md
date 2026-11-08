@@ -1,6 +1,6 @@
 ---
 name: runway
-description: Build, run and read the logs of an iOS, iPadOS or macOS app in an Xcode project with the runway CLI, on a simulator or a physical device. Use when asked to build the app, run or launch it, check its console output or logs, list simulators or devices, or confirm that a change works in the running app.
+description: Build, run, screenshot and read the logs of an iOS, iPadOS or macOS app in an Xcode project with the runway CLI, on a simulator or a physical device. Use when asked to build the app, run or launch it, check its console output or logs, look at its screen, list simulators or devices, or confirm that a change works in the running app.
 ---
 
 # runway
@@ -23,20 +23,38 @@ runway build --sim --quiet
 
 ## Run
 
-`runway run` builds, installs and launches the app, then streams its console (`print`, stdout, stderr) **until the app exits or is stopped. Most apps never exit, so always use `--timeout`**:
+`runway run` builds, installs and launches the app, then streams its console (`print`, stdout, stderr) **until the app exits or is stopped. Most apps never exit, so always use `--timeout`**, and `--until` when you know what output to wait for:
 
 ```sh
 runway run --sim --headless --timeout 30s
+runway run --sim --headless --until 'Loaded \d+ items' --timeout 60s
 runway run --sim --headless --timeout 30s --logs     # also Logger / os_log messages
 runway run --sim --headless --timeout 30s --no-build # relaunch the last build
 runway run --sim --headless --timeout 30s --env API_URL=http://localhost:8080 -- -FeatureFlag YES
 ```
 
 - `--timeout` starts counting when the app launches, so the build doesn't count. When it expires, runway stops the app and exits 0. If the app exits or crashes first, runway exits with the app's status.
+- `--until <regexp>` stops the app and exits 0 as soon as a line of its output matches (stdout, stderr, and with `--logs` the log lines, which start with `log │`). If `--timeout` expires or the app exits before a match, runway exits non-zero, so a failing exit status means "didn't happen". This is the fastest way to check that the app reaches a state: add a `print` or `Logger` line there and wait for it.
+- The app is stopped when runway returns. To look at its screen, take the screenshot while it runs (see below).
 - Always pass `--headless`, so the simulator window doesn't jump in front of the user's work.
 - Running again replaces the copy that is already running.
 - Lines starting with `log │` come from the unified log (`--logs`). Everything else is the app's console.
 - Arguments after `--` go to the app.
+
+## Screenshots
+
+```sh
+runway screenshot                        # booted simulator → screenshot-<date>-<time>.png
+runway screenshot -o shots/settings.png  # .png, .jpg, .tiff, .bmp or .gif
+```
+
+runway prints the file's path on stdout. Read that image to check the UI. Screenshots work on booted simulators only. The app must be running, so start it in the background first, then take the screenshot once it's ready:
+
+```sh
+runway run --sim --headless --timeout 60s > run.log 2>&1 &
+sleep 10   # or poll run.log for a line you expect
+runway screenshot -o shot.png
+```
 
 ## Logs
 

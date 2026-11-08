@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	linesplit "github.com/stefankn/runway/internal/lines"
 	"github.com/stefankn/runway/internal/ui"
 	"github.com/stefankn/runway/internal/xcode"
 )
@@ -46,6 +48,7 @@ func newRunCommand(opts *options) *cobra.Command {
 		noBuild, headless, raw, quiet, logs bool
 		env                                 []string
 		timeout                             time.Duration
+		until                               string
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] [-- app arguments]",
@@ -61,17 +64,31 @@ after -- is passed to the app as launch arguments.
 With --timeout, runway stops the app after it has run that long and exits
 with status 0, as if you had pressed Ctrl-C. The time starts when the app
 launches, so the build doesn't count. This suits scripts and AI agents that
-want the app's output without waiting for Ctrl-C.`,
+want the app's output without waiting for Ctrl-C.
+
+With --until, runway stops the app as soon as a line of its output (stdout,
+stderr and, with --logs, its log) matches the regular expression, and exits
+with status 0. Lines are matched as shown, so log lines include the "log │"
+prefix. If the app exits, or --timeout expires, before a line matches, runway
+exits with an error: the app's status, or else 1.`,
 		Example: `  runway run --sim
   runway run --sim "iPhone 18 Pro" --env API_URL=http://localhost:8080
   runway run --device "iPhone 13"
   runway run --sim --logs
   runway run --no-build -- -FeatureFlag YES
-  runway run --sim --headless --timeout 30s`,
+  runway run --sim --headless --timeout 30s
+  runway run --sim --headless --until 'Loaded \d+ items' --timeout 60s`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if timeout < 0 {
 				return fmt.Errorf("invalid --timeout %s: must not be negative", timeout)
+			}
+			var untilRE *regexp.Regexp
+			if until != "" {
+				var err error
+				if untilRE, err = regexp.Compile(until); err != nil {
+					return fmt.Errorf("invalid --until: %w", err)
+				}
 			}
 			for _, kv := range env {
 				if !envVarRE.MatchString(kv) {
@@ -90,7 +107,7 @@ want the app's output without waiting for Ctrl-C.`,
 			stderr := cmd.ErrOrStderr()
 			st := ui.NewStyler(stderr)
 			s := session{
-				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless, logs: logs, timeout: timeout,
+				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless, logs: logs, timeout: timeout, until: untilRE,
 				stdout: cmd.OutOrStdout(), stderr: stderr, st: st,
 				status: func(format string, a ...any) {
 					if !quiet {
@@ -111,6 +128,11 @@ want the app's output without waiting for Ctrl-C.`,
 				return err
 			}
 
+			// --until cancels runCtx when a line matches.
+			runCtx, stopRun := context.WithCancelCause(ctx)
+			defer stopRun(nil)
+			s.runCtx, s.stopRun = runCtx, stopRun
+
 			if t.dest.Simulator != nil {
 				return s.runOnSimulator(*t.dest.Simulator)
 			}
@@ -127,6 +149,7 @@ want the app's output without waiting for Ctrl-C.`,
 	f.BoolVar(&quiet, "quiet", false, "only show build errors and the app's output")
 	f.BoolVar(&logs, "logs", false, "also show the app's unified log (Logger, os_log)")
 	f.DurationVar(&timeout, "timeout", 0, "stop the app after it has run this long, e.g. 30s (0: no limit)")
+	f.StringVar(&until, "until", "", "stop the app when a line of its output matches this `regexp`")
 	return cmd
 }
 
@@ -139,11 +162,17 @@ type session struct {
 	env      []string
 	headless bool
 	logs     bool
-	timeout  time.Duration // 0: run until the app exits or Ctrl-C
+	timeout  time.Duration  // 0: run until the app exits or Ctrl-C
+	until    *regexp.Regexp // nil: no --until
 	stdout   io.Writer
 	stderr   io.Writer
 	st       ui.Styler
 	status   func(format string, a ...any)
+
+	// runCtx is the command's context, which --until cancels with
+	// errRunUntil through stopRun when a line matches.
+	runCtx  context.Context
+	stopRun context.CancelCauseFunc
 }
 
 func (s *session) runOnSimulator(sim xcode.Simulator) error {
@@ -175,7 +204,7 @@ func (s *session) runOnSimulator(sim xcode.Simulator) error {
 	// The app's stdin is not connected: a console that put the terminal in
 	// raw mode would swallow Ctrl-C.
 	p, err := client.SimLaunch(ctx, sim.UDID, s.app.BundleID, s.appArgs, s.env,
-		xcode.ConsoleIO{Stdout: s.stdout, Stderr: s.stderr})
+		xcode.ConsoleIO{Stdout: s.watch(s.stdout), Stderr: s.watch(s.stderr)})
 	if err != nil {
 		return err
 	}
@@ -210,7 +239,7 @@ func (s *session) runOnDevice(dev xcode.Device) error {
 	// stderr; watch them for hints.
 	hints := newHintScanner()
 	p, err := client.DeviceLaunch(ctx, dev.UDID, s.app.BundleID, s.appArgs, env,
-		xcode.ConsoleIO{Stdout: s.stdout, Stderr: io.MultiWriter(s.stderr, hints)})
+		xcode.ConsoleIO{Stdout: s.watch(s.stdout), Stderr: s.watch(io.MultiWriter(s.stderr, hints))})
 	if err != nil {
 		return err
 	}
@@ -246,7 +275,7 @@ func (s *session) startSimLogs(sim xcode.Simulator) (stop func()) {
 	// The console and the log stream write from different goroutines.
 	out := &syncWriter{w: s.stdout}
 	s.stdout = out
-	printer := &logPrinter{w: out, st: ui.NewStyler(s.cmd.OutOrStdout()), prefix: ui.NewStyler(s.cmd.OutOrStdout()).Dim("log │ ")}
+	printer := &logPrinter{w: s.watch(out), st: ui.NewStyler(s.cmd.OutOrStdout()), prefix: ui.NewStyler(s.cmd.OutOrStdout()).Dim("log │ ")}
 	pw := printer.writer()
 	ls, err := s.t.client.SimLogStream(ctx, sim.UDID, xcode.LogFilter{Subsystem: sub},
 		xcode.LogOutput{Stdout: pw, Stderr: s.stderr})
@@ -279,24 +308,50 @@ func (s *session) startSimLogs(sim xcode.Simulator) (stop func()) {
 }
 
 func (s *session) launching(where string) {
-	stop := "Ctrl-C to stop"
+	var when []string
+	if s.until != nil {
+		when = append(when, "when output matches --until")
+	}
 	if s.timeout > 0 {
-		stop = fmt.Sprintf("stops after %s, or Ctrl-C", s.timeout)
+		when = append(when, "after "+s.timeout.String())
+	}
+	stop := "Ctrl-C to stop"
+	if len(when) > 0 {
+		stop = "stops " + strings.Join(when, " or ") + "; " + stop
 	}
 	fmt.Fprintln(s.stderr, s.st.Dim(fmt.Sprintf("Launching %s on %s (%s)", s.app.BundleID, where, stop)))
 }
 
-// errRunTimeout is the cancellation cause when --timeout ends the run.
-var errRunTimeout = errors.New("run timeout")
+// The cancellation causes when --timeout or --until ends the run.
+var (
+	errRunTimeout = errors.New("run timeout")
+	errRunUntil   = errors.New("output matched --until")
+)
 
-// launchContext returns the context the launched app runs under. With
-// --timeout it ends after that long, which stops the app as Ctrl-C does.
+// launchContext returns the context the launched app runs under. It ends
+// when --until matches, or with --timeout after that long, which stops the
+// app as Ctrl-C does.
 func (s *session) launchContext() (context.Context, context.CancelFunc) {
-	ctx := s.cmd.Context()
 	if s.timeout <= 0 {
-		return context.WithCancel(ctx)
+		return context.WithCancel(s.runCtx)
 	}
-	return context.WithTimeoutCause(ctx, s.timeout, errRunTimeout)
+	return context.WithTimeoutCause(s.runCtx, s.timeout, errRunTimeout)
+}
+
+// ansiEscape matches terminal escape sequences, such as colours.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// watch returns w, also matching each line written to it against --until.
+// Each output stream needs its own watcher, so lines don't interleave.
+func (s *session) watch(w io.Writer) io.Writer {
+	if s.until == nil {
+		return w
+	}
+	return io.MultiWriter(w, linesplit.New(func(l []byte) {
+		if s.until.Match(ansiEscape.ReplaceAll(l, nil)) {
+			s.stopRun(errRunUntil)
+		}
+	}))
 }
 
 // printHints prints hints matching a failed command's error and stderr.
@@ -312,16 +367,24 @@ func (s *session) printHints(err error) {
 }
 
 // finish turns the end of a launched app into runway's result. ctx is the
-// launch context. When it has ended (Ctrl-C or --timeout), finish calls stop
-// with a fresh, time-limited context; after Ctrl-C it returns the
-// cancellation, after --timeout nil. Otherwise the app's exit status becomes
-// runway's.
+// launch context. When it has ended (Ctrl-C, --timeout or --until), finish
+// calls stop with a fresh, time-limited context and returns: the
+// cancellation after Ctrl-C; nil after --until matched, or after --timeout
+// without --until; an error after --timeout when --until never matched.
+// When the app exits by itself, its exit status becomes runway's; with
+// --until, a clean exit without a match is an error.
 func (s *session) finish(ctx context.Context, waitErr error, timeout time.Duration, stop func(context.Context)) error {
 	if ctx.Err() != nil {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 		defer cancel()
 		stop(stopCtx)
-		if errors.Is(context.Cause(ctx), errRunTimeout) {
+		switch cause := context.Cause(ctx); {
+		case errors.Is(cause, errRunUntil):
+			fmt.Fprintln(s.stderr, s.st.Dim("Stopped the app: output matched --until"))
+			return nil
+		case errors.Is(cause, errRunTimeout) && s.until != nil:
+			return fmt.Errorf("no output matched --until %q within %s; stopped the app", s.until, s.timeout)
+		case errors.Is(cause, errRunTimeout):
 			fmt.Fprintln(s.stderr, s.st.Dim(fmt.Sprintf("Stopped the app after %s (--timeout)", s.timeout)))
 			return nil
 		}
@@ -329,6 +392,9 @@ func (s *session) finish(ctx context.Context, waitErr error, timeout time.Durati
 	}
 	if ee, ok := errors.AsType[*xcode.ExitError](waitErr); ok {
 		return &appExitError{code: ee.Code}
+	}
+	if waitErr == nil && s.until != nil {
+		return fmt.Errorf("the app exited before its output matched --until %q", s.until)
 	}
 	return waitErr
 }

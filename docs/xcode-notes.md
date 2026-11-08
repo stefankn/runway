@@ -140,6 +140,27 @@ instead of `simctl boot`, so `install` never runs on a half-booted simulator.
   `sandbox_extension_issue_file … Operation not permitted`. This only affects
   sandboxed development environments, not normal use.
 
+## Simulator screenshots (`simctl io … screenshot`)
+
+Checked 2026-11-08 on an iOS 27.2 simulator:
+
+- `xcrun simctl io <udid> screenshot [--type=<type>] <file>` writes a
+  full-resolution image (1206×2622 on iPhone 17) and exits 0. It prints only
+  to stderr ("Detected file type from extension", "Note: No display
+  specified. Defaulting to display …", "Wrote screenshot to: …"); stdout is
+  empty.
+- An existing file is overwritten without asking.
+- Without `--type`, it picks the type from the extension (`.jpg` gives JPEG),
+  but for an extension it doesn't know (`.webp`) or none it silently writes
+  PNG data. runway always passes `--type` and only accepts .png, .jpg/.jpeg,
+  .tif/.tiff, .bmp and .gif.
+- A missing parent folder fails with exit 4 (`NSCocoaErrorDomain code=4`), so
+  runway creates it first.
+- On a shut-down simulator it waits and then fails with exit 60 ("Timeout
+  waiting for screen surfaces"), so runway refuses up front.
+- `-` as the file means stdout. runway makes the path absolute, so a file
+  named `-` (or starting with `-`) can't be taken for that or for an option.
+
 ## Simulator log stream (`simctl spawn … log stream`)
 
 Checked 2026-11-08 on an iOS 27.2 simulator:
