@@ -36,7 +36,7 @@ func (f *logFlags) register(cmd *cobra.Command) {
 	fl.StringVar(&f.level, "level", xcode.LevelDebug, "lowest level to show: default, info or debug")
 	fl.StringVar(&f.category, "category", "", "only show this Logger category")
 	fl.StringVar(&f.process, "process", "", "only show messages from this process")
-	fl.StringVar(&f.predicate, "predicate", "", "raw NSPredicate filter, replacing the subsystem filter (see `man log`)")
+	fl.StringVar(&f.predicate, "predicate", "", "raw NSPredicate `filter`, replacing the subsystem filter (see man log)")
 	fl.BoolVar(&f.all, "all", false, "show everything, not just the app's subsystem")
 	fl.BoolVar(&f.json, "json", false, "print the log tool's NDJSON unchanged")
 	fl.StringVar(&f.last, "last", "", "show recent messages instead of streaming, e.g. 5m, 1h (required for devices)")

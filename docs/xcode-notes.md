@@ -1,10 +1,10 @@
 # Xcode 27.2 notes
 
-Results of the checks in PLAN.md §8, verified on macOS 27.2 with Xcode 27.2
-(build 27B52). When Apple changes something, update this file along with the
-code in `internal/xcode`.
+Behaviour of Apple's tools that runway relies on, verified on macOS 27.2 with
+Xcode 27.2 (build 27B52). When Apple changes something, update this file along
+with the code in `internal/xcode`.
 
-## §8.1 devicectl JSON (version 5)
+## devicectl JSON (version 5)
 
 Checked 2026-11-07 with devicectl 651.32. The full field mapping, including
 the deprecated fallbacks, is documented on `deviceFromJSON` in
@@ -22,12 +22,12 @@ the deprecated fallbacks, is documented on `deviceFromJSON` in
   an object with `stringValue` in `properties` and a plain string in the old field.
 - Device names can contain a non-breaking space (U+00A0), e.g. "Apple Watch".
 
-## §8.2 devicectl stdout
+## devicectl stdout
 
 `devicectl list devices --json-output -` writes only JSON to stdout. Its
 human-readable table goes to stderr.
 
-## §8.5 Xcode 27.2 JSON project format
+## Xcode 27.2 JSON project format
 
 The new format is a `project.xcproj` JSON file **inside** the `.xcodeproj`
 bundle, replacing `project.pbxproj`. It is not a standalone `Foo.xcproj` next
@@ -52,7 +52,7 @@ uses `TARGET_BUILD_DIR/WRAPPER_NAME` and `PRODUCT_BUNDLE_IDENTIFIER`. With
 `<derived data>/Build/Products/<Configuration>-<sdk>`. For a scheme whose app
 embeds a widget extension, only the app target was listed.
 
-## Destinations by UDID (PLAN §7 acceptance)
+## Destinations by UDID
 
 Confirmed 2026-11-07: UDIDs printed by `runway simulators` and `runway devices`
 work as `-destination platform=…,id=<UDID>`, both for a simulator and for a
@@ -71,7 +71,7 @@ Still unconfirmed (the hint patterns are best guesses): the exact signing,
 locked-device, Developer Mode and pairing messages. Check them with a real
 device build and update `internal/cli/hints.go`.
 
-## §8.3 SIGINT during `simctl launch --console-pty`
+## SIGINT during `simctl launch --console-pty`
 
 Checked 2026-11-07: simctl passes SIGINT on to the app, which quits at once;
 simctl then exits with status **0**. A following
@@ -96,7 +96,7 @@ Known limitation on devices: when the app exits by itself, devicectl reports
 called `exit(3)` (seen with a Debug build). runway can only pass on what
 devicectl returns. Simulators report the real exit status.
 
-## §8.6 Simulator window
+## Simulator window
 
 Xcode 27.2 has no Simulator.app. Simulators are shown in **DeviceHub**
 (`Xcode.app/Contents/Applications/DeviceHub.app`, bundle ID
@@ -173,7 +173,7 @@ Checked 2026-11-08 on an iOS 27.2 simulator:
   and `runway run --sim --logs` stop their `log` process on Ctrl-C and when
   the app exits by itself (`pgrep -fl "^log stream"` finds nothing afterwards).
 
-## §8.4 Device logs
+## Device logs
 
 See [device-logs.md](device-logs.md): devicectl can't stream device logs.
 runway uses `OS_ACTIVITY_DT_MODE=1` for `run --device --logs` (verified on an

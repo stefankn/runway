@@ -1,8 +1,8 @@
 # Unified logs from physical devices
 
-PLAN.md §7 (`runway logs`) and §8.4 ask whether a physical device's unified
-log (`Logger`, `os_log`) can be streamed from the command line with Xcode
-27.2. This file records what was found and what runway does.
+Can a physical device's unified log (`Logger`, `os_log`) be streamed from the
+command line with Xcode 27.2? This file records what was found and what
+runway does.
 
 ## Findings
 
