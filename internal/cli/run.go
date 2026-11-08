@@ -45,6 +45,7 @@ func newRunCommand(opts *options) *cobra.Command {
 		df                                  destFlags
 		noBuild, headless, raw, quiet, logs bool
 		env                                 []string
+		timeout                             time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] [-- app arguments]",
@@ -55,14 +56,23 @@ until the app exits or you press Ctrl-C, which also stops the app.
 
 With --logs, the app's unified log (Logger, os_log) is shown too, each line
 prefixed with "log │". Running again replaces the running copy. Everything
-after -- is passed to the app as launch arguments.`,
+after -- is passed to the app as launch arguments.
+
+With --timeout, runway stops the app after it has run that long and exits
+with status 0, as if you had pressed Ctrl-C. The time starts when the app
+launches, so the build doesn't count. This suits scripts and AI agents that
+want the app's output without waiting for Ctrl-C.`,
 		Example: `  runway run --sim
   runway run --sim "iPhone 18 Pro" --env API_URL=http://localhost:8080
   runway run --device "iPhone 13"
   runway run --sim --logs
-  runway run --no-build -- -FeatureFlag YES`,
+  runway run --no-build -- -FeatureFlag YES
+  runway run --sim --headless --timeout 30s`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout < 0 {
+				return fmt.Errorf("invalid --timeout %s: must not be negative", timeout)
+			}
 			for _, kv := range env {
 				if !envVarRE.MatchString(kv) {
 					return fmt.Errorf("invalid --env %q: use KEY=VALUE", kv)
@@ -80,7 +90,7 @@ after -- is passed to the app as launch arguments.`,
 			stderr := cmd.ErrOrStderr()
 			st := ui.NewStyler(stderr)
 			s := session{
-				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless, logs: logs,
+				cmd: cmd, t: t, appArgs: argsAfterDash(cmd, args), env: env, headless: headless, logs: logs, timeout: timeout,
 				stdout: cmd.OutOrStdout(), stderr: stderr, st: st,
 				status: func(format string, a ...any) {
 					if !quiet {
@@ -116,6 +126,7 @@ after -- is passed to the app as launch arguments.`,
 	f.BoolVar(&raw, "raw", false, "show xcodebuild's output without xcbeautify")
 	f.BoolVar(&quiet, "quiet", false, "only show build errors and the app's output")
 	f.BoolVar(&logs, "logs", false, "also show the app's unified log (Logger, os_log)")
+	f.DurationVar(&timeout, "timeout", 0, "stop the app after it has run this long, e.g. 30s (0: no limit)")
 	return cmd
 }
 
@@ -128,6 +139,7 @@ type session struct {
 	env      []string
 	headless bool
 	logs     bool
+	timeout  time.Duration // 0: run until the app exits or Ctrl-C
 	stdout   io.Writer
 	stderr   io.Writer
 	st       ui.Styler
@@ -158,6 +170,8 @@ func (s *session) runOnSimulator(sim xcode.Simulator) error {
 	}
 
 	s.launching(sim.Name)
+	ctx, cancel := s.launchContext()
+	defer cancel()
 	// The app's stdin is not connected: a console that put the terminal in
 	// raw mode would swallow Ctrl-C.
 	p, err := client.SimLaunch(ctx, sim.UDID, s.app.BundleID, s.appArgs, s.env,
@@ -165,7 +179,7 @@ func (s *session) runOnSimulator(sim xcode.Simulator) error {
 	if err != nil {
 		return err
 	}
-	return finish(ctx, p.Wait(), simStopTimeout, func(stopCtx context.Context) {
+	return s.finish(ctx, p.Wait(), simStopTimeout, func(stopCtx context.Context) {
 		// simctl has passed SIGINT on to the app (which quits); terminating
 		// too is a safety net, like Xcode's Stop button.
 		_ = client.SimTerminate(stopCtx, sim.UDID, s.app.BundleID)
@@ -190,6 +204,8 @@ func (s *session) runOnDevice(dev xcode.Device) error {
 	}
 
 	s.launching(dev.Name)
+	ctx, cancel := s.launchContext()
+	defer cancel()
 	// devicectl's error messages (locked device, untrusted developer, …) go to
 	// stderr; watch them for hints.
 	hints := newHintScanner()
@@ -204,7 +220,7 @@ func (s *session) runOnDevice(dev xcode.Device) error {
 			fmt.Fprintln(s.stderr, s.st.Yellow("hint: ")+h)
 		}
 	}
-	return finish(ctx, waitErr, deviceStopTimeout, func(stopCtx context.Context) {
+	return s.finish(ctx, waitErr, deviceStopTimeout, func(stopCtx context.Context) {
 		// devicectl forwards SIGINT to the app; as a safety net, find the
 		// app's process and terminate it. Errors mean it has already quit.
 		if pid, found, err := client.DeviceAppPID(stopCtx, dev.UDID, s.app); err == nil && found {
@@ -263,7 +279,24 @@ func (s *session) startSimLogs(sim xcode.Simulator) (stop func()) {
 }
 
 func (s *session) launching(where string) {
-	fmt.Fprintln(s.stderr, s.st.Dim(fmt.Sprintf("Launching %s on %s (Ctrl-C to stop)", s.app.BundleID, where)))
+	stop := "Ctrl-C to stop"
+	if s.timeout > 0 {
+		stop = fmt.Sprintf("stops after %s, or Ctrl-C", s.timeout)
+	}
+	fmt.Fprintln(s.stderr, s.st.Dim(fmt.Sprintf("Launching %s on %s (%s)", s.app.BundleID, where, stop)))
+}
+
+// errRunTimeout is the cancellation cause when --timeout ends the run.
+var errRunTimeout = errors.New("run timeout")
+
+// launchContext returns the context the launched app runs under. With
+// --timeout it ends after that long, which stops the app as Ctrl-C does.
+func (s *session) launchContext() (context.Context, context.CancelFunc) {
+	ctx := s.cmd.Context()
+	if s.timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeoutCause(ctx, s.timeout, errRunTimeout)
 }
 
 // printHints prints hints matching a failed command's error and stderr.
@@ -278,14 +311,20 @@ func (s *session) printHints(err error) {
 	}
 }
 
-// finish turns the end of a launched app into runway's result. After Ctrl-C
-// (ctx cancelled) it calls stop with a fresh, time-limited context and returns
-// the cancellation; otherwise the app's exit status becomes runway's.
-func finish(ctx context.Context, waitErr error, timeout time.Duration, stop func(context.Context)) error {
+// finish turns the end of a launched app into runway's result. ctx is the
+// launch context. When it has ended (Ctrl-C or --timeout), finish calls stop
+// with a fresh, time-limited context; after Ctrl-C it returns the
+// cancellation, after --timeout nil. Otherwise the app's exit status becomes
+// runway's.
+func (s *session) finish(ctx context.Context, waitErr error, timeout time.Duration, stop func(context.Context)) error {
 	if ctx.Err() != nil {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 		defer cancel()
 		stop(stopCtx)
+		if errors.Is(context.Cause(ctx), errRunTimeout) {
+			fmt.Fprintln(s.stderr, s.st.Dim(fmt.Sprintf("Stopped the app after %s (--timeout)", s.timeout)))
+			return nil
+		}
 		return ctx.Err()
 	}
 	if ee, ok := errors.AsType[*xcode.ExitError](waitErr); ok {

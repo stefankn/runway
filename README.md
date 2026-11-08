@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/logo.svg" alt="runway logo" width="160">
-</p>
+<img src="docs/logo.svg" alt="runway logo" width="160">
 
 # runway
 
@@ -61,6 +59,7 @@ runway run --sim "iPhone 18 Pro"
 | `runway devices` | List connected and paired physical devices |
 | `runway init` | Write a `.runway.toml` for the project in this folder |
 | `runway config` | Show the settings runway would use and where each one comes from |
+| `runway skill` | Print or install the Agent Skill that teaches AI coding agents to use runway |
 | `runway version` | Print the version, commit and build date |
 | `runway completion` | Generate shell completions (zsh, bash, fish, powershell) |
 
@@ -84,9 +83,12 @@ runway run --sim "iPhone 18 Pro" --env API_URL=http://localhost:8080
 runway run --device "iPhone 13"
 runway run --no-build -- -FeatureFlag YES     # arguments after -- go to the app
 runway run --sim --logs                       # also show Logger / os_log messages
+runway run --sim --timeout 30s                # stop the app after 30 seconds
 ```
 
 The app's `print()`, stdout and stderr appear live. Ctrl-C stops the app, just like Xcode's Stop button. Running again replaces the copy that is already running. Use `--headless` to keep the simulator window in the background.
+
+`--timeout` stops the app once it has run for the given time and exits with status 0, which is useful in scripts and for AI agents. The time starts when the app launches, so the build doesn't count. If the app exits first, runway exits with the app's status.
 
 `Logger` and `os_log` messages go to the unified log, not to stdout, so `run` doesn't show them by default. Add `--logs` to see them in the same terminal, each prefixed with `log │`. On a device, `--logs` sets `OS_ACTIVITY_DT_MODE=1` for the app instead, which makes it copy those messages (info and above) to its console (see [docs/device-logs.md](docs/device-logs.md)).
 
@@ -125,6 +127,18 @@ runway devices --all       # include unpaired and unavailable devices
 ```
 
 Both commands accept `--json`, which prints runway's own JSON instead of a table. The UDIDs they print work with `--sim`, `--device` and `xcodebuild -destination`.
+
+## AI coding agents
+
+runway works well for AI coding agents such as Claude Code: it never prompts when it isn't run in a terminal, turns colour off, has JSON output for the commands an agent reads, and passes on exit codes. `runway skill` prints an Agent Skill (`SKILL.md`) that tells an agent how to use it, for example to always pass `--timeout` and `--headless` to `run`.
+
+```sh
+runway skill install            # for Claude Code, in ~/.claude/skills (all projects)
+runway skill install --project  # in .claude/skills of this project, to commit and share
+runway skill > runway.md        # or paste it into CLAUDE.md / AGENTS.md
+```
+
+The skill ships inside the binary, so it matches the installed version. After upgrading runway, run `runway skill install --force` to update it.
 
 ## Configuration
 

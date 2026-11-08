@@ -244,6 +244,66 @@ func TestRunCtrlC(t *testing.T) {
 	}
 }
 
+func TestRunTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		dest, stopCmd string
+	}{
+		{"--sim", "xcrun simctl terminate"},
+		{"--device", "xcrun devicectl device process terminate"},
+	} {
+		dir, appPath := runSetup(t, true)
+		f := runFake(t, appPath, xcode.FakeResult{Block: true}, xcode.FakeResult{})
+		done := make(chan error, 1)
+		var errOut string
+		go func() {
+			var err error
+			_, errOut, err = runOpts(t, &options{workDir: dir, testRunner: f}, "run", tc.dest, "--headless", "--timeout", "50ms")
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("%s: err = %v, want nil (exit 0) after --timeout", tc.dest, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: run did not return after --timeout", tc.dest)
+		}
+		if !slices.ContainsFunc(flow(f, 5), func(s string) bool { return strings.HasPrefix(s, tc.stopCmd) }) {
+			t.Errorf("%s: app was not stopped: %q", tc.dest, flow(f, 5))
+		}
+		for _, s := range []string{"(stops after 50ms, or Ctrl-C)", "Stopped the app after 50ms (--timeout)"} {
+			if !strings.Contains(errOut, s) {
+				t.Errorf("%s: stderr is missing %q:\n%s", tc.dest, s, errOut)
+			}
+		}
+	}
+}
+
+func TestRunTimeoutAppExitsFirst(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+	launch := xcode.FakeResult{Err: &xcode.ExitError{Cmd: xcode.Cmd{Name: "xcrun"}, Code: 3}}
+	f := runFake(t, appPath, launch, xcode.FakeResult{})
+	_, _, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--timeout", "1m")
+	if ec, ok := errors.AsType[ExitCoder](err); !ok || ec.ExitCode() != 3 {
+		t.Errorf("err = %v, want the app's exit status 3", err)
+	}
+	if hasCommand(f, "xcrun simctl terminate") {
+		t.Error("app exited by itself; it should not be terminated")
+	}
+}
+
+func TestRunRejectsNegativeTimeout(t *testing.T) {
+	dir, appPath := runSetup(t, true)
+	f := runFake(t, appPath, xcode.FakeResult{}, xcode.FakeResult{})
+	_, _, err := runOpts(t, &options{workDir: dir, testRunner: f}, "run", "--sim", "--timeout", "-5s")
+	if err == nil || !strings.Contains(err.Error(), "invalid --timeout") {
+		t.Errorf("err = %v", err)
+	}
+	if hasCommand(f, "xcodebuild build") {
+		t.Error("built before rejecting --timeout")
+	}
+}
+
 func TestRunRejectsOtherDestinations(t *testing.T) {
 	dir, appPath := runSetup(t, true)
 	for _, tc := range []struct {

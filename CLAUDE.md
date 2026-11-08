@@ -35,7 +35,7 @@ A pushed `v*` tag runs `.github/workflows/release.yml`: unit tests, then GoRelea
 - **`destination`**: turns `--sim` / `--device` / `--destination` / config / the picker into a concrete simulator or device. Name matching goes exact → case-insensitive → unique prefix, and ambiguous matches go to the picker or an error listing UDIDs.
 - **`lines`**: an `io.Writer` that splits streamed output into lines (used to parse and format `log` output).
 - **`ui`**: colours, tables, the `huh`-based picker. The picker is nil when stdin/stderr is not a TTY, and callers must then fail with a list of candidates instead of prompting.
-- **`cli`**: cobra commands. A shared `options` struct carries `--verbose` plus test hooks (`testRunner`, `testPicker`, `workDir`). CLI tests call `execute(...)` or `runOpts(...)` with a `FakeRunner` and assert on the recorded commands. `hints.go` scans tool output for known failures (signing, Developer Mode, missing destination) and prints a hint *after* the raw error, never in place of it.
+- **`cli`**: cobra commands. `SKILL.md` is the Agent Skill that `runway skill` prints and installs (embedded with `go:embed`); update it when commands or flags change, and `TestSkillFlagsExist` fails if it names a flag that doesn't exist. A shared `options` struct carries `--verbose` plus test hooks (`testRunner`, `testPicker`, `workDir`). CLI tests call `execute(...)` or `runOpts(...)` with a `FakeRunner` and assert on the recorded commands. `hints.go` scans tool output for known failures (signing, Developer Mode, missing destination) and prints a hint *after* the raw error, never in place of it.
 
 ### Process and signal model
 
@@ -43,6 +43,7 @@ Read this before touching `run`, `Runner`, or signal handling:
 - Every child runs in its own process group (`Setpgid`). On context cancel, `ExecRunner` sends one SIGINT to the group, then kills after `WaitDelay` (3s).
 - `cli.Execute` turns the first SIGINT/SIGTERM/SIGHUP into context cancellation and then restores default handling, so a second Ctrl-C exits immediately. Interrupt exits with status 130.
 - Child exit codes propagate through `ExitCoder` (`*xcode.ExitError`, and `appExitError` in `run.go`).
+- `run --timeout` runs the app under a child context that ends with the cause `errRunTimeout`; `finish` then stops the app as for Ctrl-C but returns nil (exit 0).
 - `run` stops the launched app explicitly on Ctrl-C (`simctl terminate` / `devicectl … process terminate`), as Xcode's Stop button does.
 - `log stream` runs inside the simulator via `simctl spawn`, which ignores signals, and the in-simulator `log` survives killing `simctl`. `LogStream` (`logstream.go`) therefore starts it on a detached context with a marker in the predicate (`eventMessage != "runway-<random>"`), finds its PID with `pgrep -f` (simulator processes are host processes), and stops it with `kill -INT`, which makes it exit cleanly. See `docs/xcode-notes.md`.
 

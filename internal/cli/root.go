@@ -105,6 +105,7 @@ see every underlying command.`,
 		newLogsCommand(opts),
 		newRunCommand(opts),
 		newSimulatorsCommand(opts),
+		newSkillCommand(opts),
 		newVersionCommand(info),
 	)
 	return root
