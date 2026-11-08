@@ -192,10 +192,10 @@ Don't guess about these. Check each against Xcode 27.2 and record the result in 
 ## 10. Distribution (Homebrew)
 
 - **GoReleaser:** build `darwin/arm64` only (Xcode 27 is Apple-silicon-only, so an Intel build would be pointless). Use `-trimpath` and inject version, commit and date with `-ldflags`.
-- **Homebrew tap:** a separate repo `github.com/stefankn/homebrew-tap`. GoReleaser's `homebrew_casks:` section updates `Casks/runway.rb` on each release. (Its `brews:` formulas for prebuilt binaries are deprecated.) Users install with `brew install stefankn/tap/runway`. GoReleaser makes the cask depend on macOS and `arch: :arm64`; it removes the quarantine attribute because the binary isn't notarized.
+- **Homebrew tap:** a separate repo `github.com/stefankn/homebrew-tap`. GoReleaser's `homebrew_casks:` section updates `Casks/runway.rb` on each release. (Its `brews:` formulas for prebuilt binaries are deprecated.) Users install with `brew install stefankn/tap/runway`. GoReleaser makes the cask depend on macOS and `arch: :arm64`.
 - **Release workflow:** `just release X.Y.Z` checks the repo and pushes a `vX.Y.Z` tag. That triggers GitHub Actions, which runs the tests and GoReleaser and updates the tap. This needs a `HOMEBREW_TAP_GITHUB_TOKEN` secret.
 - Shell completions: generated with cobra (`runway completion zsh|bash|fish`). The cask generates them at install time.
-- Optional later: sign and notarize the binary. A Homebrew-installed CLI usually doesn't need this.
+- Signing: GoReleaser signs the binary with a Developer ID certificate and notarizes it in the release workflow (the `MACOS_SIGN_*` / `MACOS_NOTARY_*` secrets). This is required: Homebrew quarantines cask downloads, and the cask runs the binary during the install to generate completions.
 
 ## 11. Milestones (build in this order; each one ends in a working, tested state)
 

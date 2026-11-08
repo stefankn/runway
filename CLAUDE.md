@@ -23,7 +23,7 @@ Unit tests need no Xcode.
 
 ## Releasing
 
-A pushed `v*` tag runs `.github/workflows/release.yml`: unit tests, then GoReleaser (`.goreleaser.yaml`). It builds `darwin/arm64` only, publishes a GitHub release, and updates the cask `Casks/runway.rb` in `stefankn/homebrew-tap` using the `HOMEBREW_TAP_GITHUB_TOKEN` secret. GoReleaser signs the binary with a Developer ID certificate and notarizes it when the `MACOS_SIGN_*` / `MACOS_NOTARY_*` secrets are set, and skips that step locally. The cask generates shell completions from `runway completion`, and its `preflight_steps` removes the quarantine attribute. It has to be preflight, because completion generation runs the binary before postflight. Before a release, run through `docs/smoke-test.md`.
+A pushed `v*` tag runs `.github/workflows/release.yml`: unit tests, then GoReleaser (`.goreleaser.yaml`). It builds `darwin/arm64` only, publishes a GitHub release, and updates the cask `Casks/runway.rb` in `stefankn/homebrew-tap` using the `HOMEBREW_TAP_GITHUB_TOKEN` secret. GoReleaser signs the binary with a Developer ID certificate and notarizes it when the `MACOS_SIGN_*` / `MACOS_NOTARY_*` secrets are set, and skips that step locally. The cask generates shell completions by running `runway completion` during the install, so a release must be notarized: Gatekeeper kills a quarantined binary that isn't. Before a release, run through `docs/smoke-test.md`.
 
 ## Architecture
 
